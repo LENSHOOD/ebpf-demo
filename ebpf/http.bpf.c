@@ -11,7 +11,6 @@
 #define MAX_HTTP_HDR_SIZE 64
 
 struct http_event_t {
-    __u32 pid;
     __u32 src_ip;
     __u32 dst_ip;
     __u16 dst_port;
@@ -26,7 +25,6 @@ SEC("socket")
 int http_filter(struct __sk_buff *skb) {
     char http_header[MAX_HTTP_HDR_SIZE];
     struct http_event_t event = {};
-    bpf_printk("HTTP filter triggered.\n");
 
     int offset = ETH_HLEN;
     struct iphdr ip;

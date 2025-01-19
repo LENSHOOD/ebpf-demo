@@ -91,14 +91,55 @@ func main() {
 			}
 
 			httpData := bytes.Trim(event.Data[:], "\x00")
-			fmt.Printf("HTTP Request from %d, to %d, pay load: %s\n", event.SrcIP, event.DstIP, httpData)
+			fmt.Printf("HTTP Request from %s, to %s, port: %d, pay load: %s\n", u32ToIPv4(ntoh(event.SrcIP)), u32ToIPv4(ntoh(event.DstIP)), ntohs(event.DstPort), httpData)
 		}
 	}()
 
 	<-sigChan
 	fmt.Println("Exiting...")
+	if err := unix.SetsockoptInt(sock, unix.SOL_SOCKET, unix.SO_DETACH_BPF, 0); err != nil {
+		log.Fatalf("Failed to detach BPF program: %v", err)
+	}
+	fmt.Println("Detached eBPF program.")
+	fmt.Println("Exited")
 }
 
-func htons(i uint16) uint16 {
-	return (i<<8)&0xFF00 | (i>>8)&0x00FF
+var HostOrder = nativeEndian()
+
+func nativeEndian() binary.ByteOrder {
+	var i uint32 = 0x01020304
+	b := make([]byte, 4)
+	binary.LittleEndian.PutUint32(b, i)
+
+	if b[0] == 0x04 {
+		return binary.LittleEndian
+	}
+	return binary.BigEndian
+}
+
+func htons(h uint16) uint16 {
+	b := make([]byte, 4)
+	HostOrder.PutUint16(b, h)
+	return binary.BigEndian.Uint16(b)
+}
+
+func ntohs(n uint16) uint16 {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint16(b, n)
+	return HostOrder.Uint16(b)
+}
+
+func ntoh(n uint32) uint32 {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint32(b, n)
+	return HostOrder.Uint32(b)
+}
+
+func u32ToIPv4(ip uint32) string {
+	return net.IPv4(
+		byte(ip>>24),
+		byte(ip>>16),
+		byte(ip>>8),
+		byte(ip),
+	).String()
 }
