@@ -1,0 +1,19 @@
+receivers:
+  ebpf_receiver:
+
+processors:
+  batch:
+
+exporters:
+  debug:
+    verbosity: detailed
+
+service:
+  pipelines:
+    traces:
+      receivers: [ebpf_receiver]
+      processors: [batch]
+      exporters: [debug]
+  telemetry:
+    logs:
+      level: debug
