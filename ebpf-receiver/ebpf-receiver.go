@@ -45,6 +45,16 @@ func (rcvr *ebpfReceiver) Start(ctx context.Context, host component.Host) error 
 	ctx = context.Background()
 	ctx, rcvr.cancel = context.WithCancel(ctx)
 
+	rcvr.loadEbpfProgram()
+
+	fmt.Println("Listening for HTTP requests...")
+
+	go rcvr.listen(ctx)()
+
+	return nil
+}
+
+func (rcvr *ebpfReceiver) loadEbpfProgram() {
 	if err := rlimit.RemoveMemlock(); err != nil {
 		log.Fatal(err)
 	}
@@ -83,17 +93,17 @@ func (rcvr *ebpfReceiver) Start(ctx context.Context, host component.Host) error 
 		log.Fatalf("Failed to create perf event reader: %v", err)
 	}
 	rcvr.eventReader = reader
+}
 
-	fmt.Println("Listening for HTTP requests...")
-
-	go func() {
+func (rcvr *ebpfReceiver) listen(ctx context.Context) func() {
+	return func() {
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			default:
 				{
-					record, err := reader.Read()
+					record, err := rcvr.eventReader.Read()
 					if err != nil {
 						log.Printf("Error reading from perf buffer: %v", err)
 						continue
@@ -108,12 +118,11 @@ func (rcvr *ebpfReceiver) Start(ctx context.Context, host component.Host) error 
 
 					httpData := bytes.Trim(event.Data[:], "\x00")
 					fmt.Printf("HTTP Request from %s, to %s, port: %d, pay load: %s\n", u32ToIPv4(ntoh(event.SrcIP)), u32ToIPv4(ntoh(event.DstIP)), ntohs(event.DstPort), httpData)
+					_ = rcvr.nextConsumer.ConsumeTraces(ctx, generateEbpfTraces(&event))
 				}
 			}
 		}
-	}()
-
-	return nil
+	}
 }
 
 func (rcvr *ebpfReceiver) Shutdown(ctx context.Context) error {
