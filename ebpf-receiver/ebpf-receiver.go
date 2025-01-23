@@ -74,7 +74,7 @@ func (rcvr *ebpfReceiver) loadEbpfProgram() {
 	}
 	rcvr.sockFd = sock
 
-	iface, err := net.InterfaceByName("ens33")
+	iface, err := net.InterfaceByName("eth0")
 	if err != nil {
 		log.Fatalf("Failed to get interface: %v", err)
 	}
