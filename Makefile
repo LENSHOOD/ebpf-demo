@@ -1,3 +1,4 @@
+DOCKER = sudo docker
 CLANG = clang
 GO = env GOOS=linux go
 
@@ -24,6 +25,11 @@ $(GO_OBJ): $(GO_SRC)
 
 run:
 	$(GO) run ./$(GO_DIR) --config config.yaml
+
+build-image:
+	$(DOCKER) build -t otel-ebpf-demo:latest .
+	$(DOCKER) tag otel-ebpf-demo:latest localhost:5000/otel-ebpf-demo:latest
+	$(DOCKER) push localhost:5000/otel-ebpf-demo:latest
 
 clean:
 	rm -f $(BPF_OBJ)

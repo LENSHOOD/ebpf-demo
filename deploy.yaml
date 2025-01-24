@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: otel-ebpf-demo-collector-daemon
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      app: otel-ebpf-demo
+  template:
+    metadata:
+      labels:
+        app: otel-ebpf-demo
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+      - name: ebpf-demo-collector
+        image: localhost:5000/otel-ebpf-demo:latest
+        imagePullPolicy: Always
+        securityContext:
+          privileged: true
+        resources:
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+          requests:
+            memory: "128Mi"
+            cpu: "250m"
+        ports:
+        - containerPort: 8000
+          name: metrics
+### Exclude master node
+#      tolerations:
+#      - key: "node-role.kubernetes.io/master"
+#        operator: "Exists"
+#        effect: "NoSchedule"
+      restartPolicy: Always
