@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"fmt"
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/perf"
 	"github.com/cilium/ebpf/rlimit"
@@ -12,12 +11,11 @@ import (
 	"go.opentelemetry.io/collector/consumer"
 	"go.uber.org/zap"
 	"golang.org/x/sys/unix"
-	"log"
 	"net"
 	"syscall"
 )
 
-type HttpEvent struct {
+type TcpEvent struct {
 	SrcIP   uint32
 	DstIP   uint32
 	DstPort uint16
@@ -25,8 +23,8 @@ type HttpEvent struct {
 }
 
 type BPFObjects struct {
-	HttpEvents *ebpf.Map     `ebpf:"http_events"`
-	Prog       *ebpf.Program `ebpf:"http_filter"`
+	TcpEvents *ebpf.Map     `ebpf:"tcp_events"`
+	Prog      *ebpf.Program `ebpf:"net_filter"`
 }
 
 type ebpfReceiver struct {
@@ -45,52 +43,52 @@ func (rcvr *ebpfReceiver) Start(ctx context.Context, host component.Host) error 
 	ctx = context.Background()
 	ctx, rcvr.cancel = context.WithCancel(ctx)
 
-	rcvr.loadEbpfProgram()
+	rcvr.loadEbpfProgram(rcvr.config.EbpfBinPath, rcvr.config.NicName)
 
-	fmt.Println("Listening for HTTP requests...")
+	rcvr.logger.Sugar().Info("Listening for TCP traffic...")
 
 	go rcvr.listen(ctx)()
 
 	return nil
 }
 
-func (rcvr *ebpfReceiver) loadEbpfProgram() {
+func (rcvr *ebpfReceiver) loadEbpfProgram(binPath string, nicName string) {
 	if err := rlimit.RemoveMemlock(); err != nil {
-		log.Fatal(err)
+		rcvr.logger.Sugar().Fatal(err)
 	}
 
-	spec, err := ebpf.LoadCollectionSpec("ebpf-receiver/ebpf/http.o")
+	spec, err := ebpf.LoadCollectionSpec(binPath)
 	if err != nil {
-		log.Fatalf("Failed to load eBPF object: %v", err)
+		rcvr.logger.Sugar().Fatal("Failed to load eBPF object: %v", err)
 	}
 
 	if err := spec.LoadAndAssign(rcvr.objs, nil); err != nil {
-		log.Fatalf("Failed to load eBPF objects: %v", err)
+		rcvr.logger.Sugar().Fatal("Failed to load eBPF objects: %v", err)
 	}
 
 	sock, err := syscall.Socket(syscall.AF_PACKET, syscall.SOCK_RAW, int(htons(syscall.ETH_P_ALL)))
 	if err != nil {
-		log.Fatalf("Failed to create raw socket: %v", err)
+		rcvr.logger.Sugar().Fatal("Failed to create raw socket: %v", err)
 	}
 	rcvr.sockFd = sock
 
-	iface, err := net.InterfaceByName("ens33")
+	iface, err := net.InterfaceByName(nicName)
 	if err != nil {
-		log.Fatalf("Failed to get interface: %v", err)
+		rcvr.logger.Sugar().Fatal("Failed to get interface: %v", err)
 	}
 
 	addr := syscall.SockaddrLinklayer{Protocol: htons(syscall.ETH_P_ALL), Ifindex: iface.Index}
 	if err := syscall.Bind(sock, &addr); err != nil {
-		log.Fatalf("Failed to bind socket: %v", err)
+		rcvr.logger.Sugar().Fatal("Failed to bind socket: %v", err)
 	}
 
 	if err := syscall.SetsockoptInt(sock, syscall.SOL_SOCKET, unix.SO_ATTACH_BPF, rcvr.objs.Prog.FD()); err != nil {
-		log.Fatalf("Failed to attach BPF program to socket: %v", err)
+		rcvr.logger.Sugar().Fatal("Failed to attach BPF program to socket: %v", err)
 	}
 
-	reader, err := perf.NewReader(rcvr.objs.HttpEvents, 4096)
+	reader, err := perf.NewReader(rcvr.objs.TcpEvents, 4096)
 	if err != nil {
-		log.Fatalf("Failed to create perf event reader: %v", err)
+		rcvr.logger.Sugar().Fatal("Failed to create perf event reader: %v", err)
 	}
 	rcvr.eventReader = reader
 }
@@ -105,19 +103,19 @@ func (rcvr *ebpfReceiver) listen(ctx context.Context) func() {
 				{
 					record, err := rcvr.eventReader.Read()
 					if err != nil {
-						log.Printf("Error reading from perf buffer: %v", err)
+						rcvr.logger.Sugar().Info("Error reading from perf buffer: %v", err)
 						continue
 					}
 
-					var event HttpEvent
+					var event TcpEvent
 					err = binary.Read(bytes.NewBuffer(record.RawSample), binary.LittleEndian, &event)
 					if err != nil {
-						log.Printf("Failed to parse event: %v", err)
+						rcvr.logger.Sugar().Info("Failed to parse event: %v", err)
 						continue
 					}
 
 					httpData := bytes.Trim(event.Data[:], "\x00")
-					fmt.Printf("HTTP Request from %s, to %s, port: %d, pay load: %s\n", u32ToIPv4(ntoh(event.SrcIP)), u32ToIPv4(ntoh(event.DstIP)), ntohs(event.DstPort), httpData)
+					rcvr.logger.Sugar().Debugf("TCP Packaet: from %s, to %s, port: %d, pay load: %v\n", u32ToIPv4(ntoh(event.SrcIP)), u32ToIPv4(ntoh(event.DstIP)), ntohs(event.DstPort), httpData)
 					_ = rcvr.nextConsumer.ConsumeTraces(ctx, generateEbpfTraces(&event))
 				}
 			}
@@ -130,16 +128,16 @@ func (rcvr *ebpfReceiver) Shutdown(ctx context.Context) error {
 		rcvr.cancel()
 	}
 
-	fmt.Println("Exiting...")
-	rcvr.eventReader.Close()
+	rcvr.logger.Sugar().Info("Exiting...")
+	_ = rcvr.eventReader.Close()
 	if err := unix.SetsockoptInt(rcvr.sockFd, unix.SOL_SOCKET, unix.SO_DETACH_BPF, 0); err != nil {
-		log.Fatalf("Failed to detach BPF program: %v", err)
+		rcvr.logger.Sugar().Fatal("Failed to detach BPF program: %v", err)
 	}
-	syscall.Close(rcvr.sockFd)
-	fmt.Println("Detached eBPF program.")
-	rcvr.objs.HttpEvents.Close()
-	rcvr.objs.Prog.Close()
-	fmt.Println("Exited")
+	_ = syscall.Close(rcvr.sockFd)
+	rcvr.logger.Sugar().Info("Detached eBPF program.")
+	_ = rcvr.objs.TcpEvents.Close()
+	_ = rcvr.objs.Prog.Close()
+	rcvr.logger.Sugar().Info("Exited")
 
 	return nil
 }

@@ -1,5 +1,7 @@
 receivers:
   ebpf_receiver:
+    ebpf_binary_path: "ebpf-receiver/ebpf/tcp.o"
+    nic_name: "cni0"
 
 processors:
   batch:

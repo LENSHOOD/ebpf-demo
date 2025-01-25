@@ -8,23 +8,23 @@
 #include <bpf/bpf_helpers.h>
 #include <linux/if_ether.h>
 
-#define MAX_HTTP_HDR_SIZE 64
+#define MAX_PACK_SIZE 64
 
-struct http_event_t {
+struct tcp_event_t {
     __u32 src_ip;
     __u32 dst_ip;
     __u16 dst_port;
-    char data[MAX_HTTP_HDR_SIZE];
+    char data[MAX_PACK_SIZE];
 };
 
 struct {
     __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
-} http_events SEC(".maps");
+} tcp_events SEC(".maps");
 
 SEC("socket")
-int http_filter(struct __sk_buff *skb) {
-    char http_header[MAX_HTTP_HDR_SIZE];
-    struct http_event_t event = {};
+int net_filter(struct __sk_buff *skb) {
+    char packet_body[MAX_PACK_SIZE];
+    struct tcp_event_t event = {};
 
     int offset = ETH_HLEN;
     struct iphdr ip;
@@ -52,10 +52,10 @@ int http_filter(struct __sk_buff *skb) {
         return 0;
     }
 
-    if (http_header[0] == 'G' || http_header[0] == 'P' || http_header[0] == 'H') {
+//    if (http_header[0] == 'G' || http_header[0] == 'P' || http_header[0] == 'H') {
         __builtin_memcpy(event.data, http_header, sizeof(http_header));
         bpf_perf_event_output(skb, &http_events, BPF_F_CURRENT_CPU, &event, sizeof(event));
-    }
+//    }
 
     return 0;
 }

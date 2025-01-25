@@ -19,6 +19,7 @@ func createTracesReceiver(_ context.Context, params receiver.Settings, baseCfg c
 
 	logger := params.Logger
 	cfg := baseCfg.(*EbpfRcvrConfig)
+	cfg.logger = logger
 
 	traceRcvr := &ebpfReceiver{
 		logger:       logger,

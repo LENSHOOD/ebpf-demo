@@ -9,7 +9,7 @@ import (
 	"math/rand"
 )
 
-func generateEbpfTraces(httpEvent *HttpEvent) ptrace.Traces {
+func generateEbpfTraces(httpEvent *TcpEvent) ptrace.Traces {
 	traces := ptrace.NewTraces()
 	resourceSpan := traces.ResourceSpans().AppendEmpty()
 	httpResource := resourceSpan.Resource()
@@ -21,7 +21,7 @@ func generateEbpfTraces(httpEvent *HttpEvent) ptrace.Traces {
 	return traces
 }
 
-func fillResourceWithAttributes(resource *pcommon.Resource, event *HttpEvent) {
+func fillResourceWithAttributes(resource *pcommon.Resource, event *TcpEvent) {
 	attrs := resource.Attributes()
 	attrs.PutStr("src.ip", u32ToIPv4(ntoh(event.SrcIP)))
 	attrs.PutStr("dest.ip", u32ToIPv4(ntoh(event.DstIP)))
