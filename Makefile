@@ -1,17 +1,19 @@
 DOCKER = sudo docker
+KBCTL = sudo kubectl
 CLANG = clang
-GO = env GOOS=linux go
+GO_ENV = env GOOS=linux
+GO = $(GO_ENV) go
 
 BPF_DIR = ebpf-receiver/ebpf
 GO_DIR = otelcol-ebpf-demo
-BPF_SRC = $(BPF_DIR)/http.bpf.c
-BPF_OBJ = $(BPF_DIR)/http.o
+BPF_SRC = $(BPF_DIR)/tcp.bpf.c
+BPF_OBJ = $(BPF_DIR)/tcp.o
 GO_SRC = $(GO_DIR)/main.go
 GO_OBJ = opentelemetry-collector
 
 build: build-collector build-ebpf build-daemon
 build-collector:
-	./ocb --config builder-config.yaml
+	$(GO_ENV) ./ocb --config builder-config.yaml
 build-ebpf: $(BPF_OBJ)
 build-daemon: $(GO_OBJ)
 
@@ -30,6 +32,9 @@ build-image:
 	$(DOCKER) build -t otel-ebpf-demo:latest .
 	$(DOCKER) tag otel-ebpf-demo:latest localhost:5000/otel-ebpf-demo:latest
 	$(DOCKER) push localhost:5000/otel-ebpf-demo:latest
+
+deploy:
+	$(KBCTL) apply -f deploy.yaml
 
 clean:
 	rm -f $(BPF_OBJ)

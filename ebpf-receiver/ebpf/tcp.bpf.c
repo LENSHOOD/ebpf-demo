@@ -48,14 +48,12 @@ int net_filter(struct __sk_buff *skb) {
     event.dst_port = tcp.dest;
     offset += tcp.doff * 4;
 
-    if (bpf_skb_load_bytes(skb, offset, http_header, sizeof(http_header)) < 0) {
+    if (bpf_skb_load_bytes(skb, offset, packet_body, sizeof(packet_body)) < 0) {
         return 0;
     }
 
-//    if (http_header[0] == 'G' || http_header[0] == 'P' || http_header[0] == 'H') {
-        __builtin_memcpy(event.data, http_header, sizeof(http_header));
-        bpf_perf_event_output(skb, &http_events, BPF_F_CURRENT_CPU, &event, sizeof(event));
-//    }
+    __builtin_memcpy(event.data, packet_body, sizeof(packet_body));
+    bpf_perf_event_output(skb, &tcp_events, BPF_F_CURRENT_CPU, &event, sizeof(event));
 
     return 0;
 }
