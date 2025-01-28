@@ -1,0 +1,253 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: monitoring
+  labels:
+    app: grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+        - name: grafana
+          image: grafana/grafana:latest
+          ports:
+            - containerPort: 3000
+          env:
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              value: "admin"
+            - name: GF_SECURITY_ADMIN_USER
+              value: "admin"
+            - name: GF_PATHS_PROVISIONING
+              value: "/etc/grafana/provisioning"
+          volumeMounts:
+            - name: grafana-datasource
+              mountPath: /etc/grafana/provisioning/datasources
+            - name: grafana-dashboard-provisioning
+              mountPath: /etc/grafana/provisioning/dashboards
+            - name: grafana-dashboard
+              mountPath: /var/lib/grafana/dashboards
+      volumes:
+        - name: grafana-datasource
+          configMap:
+            name: grafana-datasource
+        - name: grafana-dashboard-provisioning
+          configMap:
+            name: grafana-dashboard-provisioning
+        - name: grafana-dashboard
+          configMap:
+            name: grafana-dashboard-nodegraph
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana-service
+  namespace: monitoring
+spec:
+  ports:
+    - port: 3000
+      protocol: TCP
+  selector:
+    app: grafana
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasource
+  namespace: monitoring
+  labels:
+    grafana_datasource: "1"
+data:
+  postgres-datasource.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: grafana-postgresql-datasource
+        type: postgres
+        uid: "postgres-ds"
+        orgId: 1
+        url: postgres-service:5432
+        user: postgres
+        secureJsonData:
+          password: password
+        jsonData:
+          database: testdb
+          sslmode: 'disable'
+          maxOpenConns: 100
+          maxIdleConns: 100
+          maxIdleConnsAuto: true
+          connMaxLifetime: 14400
+          postgresVersion: 1700
+          timescaledb: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-provisioning
+  namespace: monitoring
+  labels:
+    grafana_datasource: "1"
+data:
+  postgres-datasource.yaml: |
+    apiVersion: 1
+    providers:
+      - name: 'default'
+        orgId: 1
+        folder: ''
+        type: file
+        disableDeletion: false
+        updateIntervalSeconds: 10
+        options:
+          path: /var/lib/grafana/dashboards
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-nodegraph
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  nodegraph-dashboard.json: |
+    {
+      "annotations": {
+        "list": [
+          {
+            "builtIn": 1,
+            "datasource": {
+              "type": "grafana",
+              "uid": "-- Grafana --"
+            },
+            "enable": true,
+            "hide": true,
+            "iconColor": "rgba(0, 211, 255, 1)",
+            "name": "Annotations & Alerts",
+            "type": "dashboard"
+          }
+        ]
+      },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 0,
+      "id": 1,
+      "links": [],
+      "panels": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "postgres-ds"
+          },
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 0
+          },
+          "id": 1,
+          "options": {
+            "edges": {},
+            "nodes": {}
+          },
+          "pluginVersion": "11.4.0",
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-postgresql-datasource",
+                "uid": "postgres-ds"
+              },
+              "editorMode": "builder",
+              "format": "table",
+              "hide": false,
+              "rawSql": "SELECT * FROM nodes LIMIT 50 ",
+              "refId": "A",
+              "sql": {
+                "columns": [
+                  {
+                    "parameters": [
+                      {
+                        "name": "*",
+                        "type": "functionParameter"
+                      }
+                    ],
+                    "type": "function"
+                  }
+                ],
+                "groupBy": [
+                  {
+                    "property": {
+                      "type": "string"
+                    },
+                    "type": "groupBy"
+                  }
+                ],
+                "limit": 50
+              },
+              "table": "nodes"
+            },
+            {
+              "datasource": {
+                "type": "grafana-postgresql-datasource",
+                "uid": "postgres-ds"
+              },
+              "editorMode": "builder",
+              "format": "table",
+              "hide": false,
+              "rawSql": "SELECT * FROM edges LIMIT 50 ",
+              "refId": "B",
+              "sql": {
+                "columns": [
+                  {
+                    "parameters": [
+                      {
+                        "name": "*",
+                        "type": "functionParameter"
+                      }
+                    ],
+                    "type": "function"
+                  }
+                ],
+                "groupBy": [
+                  {
+                    "property": {
+                      "type": "string"
+                    },
+                    "type": "groupBy"
+                  }
+                ],
+                "limit": 50
+              },
+              "table": "edges"
+            }
+          ],
+          "title": "SVC Map",
+          "type": "nodeGraph"
+        }
+      ],
+      "preload": false,
+      "schemaVersion": 40,
+      "tags": [],
+      "templating": {
+        "list": []
+      },
+      "timepicker": {},
+      "timezone": "",
+      "title": "Svc Map",
+      "uid": "bebbfhjfdep6oc",
+      "version": 1,
+      "weekStart": ""
+    }

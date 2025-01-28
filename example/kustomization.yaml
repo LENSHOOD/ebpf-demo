@@ -1,3 +1,5 @@
 resources:
   - bookinfo.yaml
   - ingress.yaml
+  - grafana.yaml
+  - postgresql.yaml
