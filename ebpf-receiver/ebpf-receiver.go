@@ -59,36 +59,36 @@ func (rcvr *ebpfReceiver) loadEbpfProgram(binPath string, nicName string) {
 
 	spec, err := ebpf.LoadCollectionSpec(binPath)
 	if err != nil {
-		rcvr.logger.Sugar().Fatal("Failed to load eBPF object: %v", err)
+		rcvr.logger.Sugar().Fatalf("Failed to load eBPF object: %v", err)
 	}
 
 	if err := spec.LoadAndAssign(rcvr.objs, nil); err != nil {
-		rcvr.logger.Sugar().Fatal("Failed to load eBPF objects: %v", err)
+		rcvr.logger.Sugar().Fatalf("Failed to load eBPF objects: %v", err)
 	}
 
 	sock, err := syscall.Socket(syscall.AF_PACKET, syscall.SOCK_RAW, int(htons(syscall.ETH_P_ALL)))
 	if err != nil {
-		rcvr.logger.Sugar().Fatal("Failed to create raw socket: %v", err)
+		rcvr.logger.Sugar().Fatalf("Failed to create raw socket: %v", err)
 	}
 	rcvr.sockFd = sock
 
 	iface, err := net.InterfaceByName(nicName)
 	if err != nil {
-		rcvr.logger.Sugar().Fatal("Failed to get interface: %v", err)
+		rcvr.logger.Sugar().Fatalf("Failed to get interface: %v", err)
 	}
 
 	addr := syscall.SockaddrLinklayer{Protocol: htons(syscall.ETH_P_ALL), Ifindex: iface.Index}
 	if err := syscall.Bind(sock, &addr); err != nil {
-		rcvr.logger.Sugar().Fatal("Failed to bind socket: %v", err)
+		rcvr.logger.Sugar().Fatalf("Failed to bind socket: %v", err)
 	}
 
 	if err := syscall.SetsockoptInt(sock, syscall.SOL_SOCKET, unix.SO_ATTACH_BPF, rcvr.objs.Prog.FD()); err != nil {
-		rcvr.logger.Sugar().Fatal("Failed to attach BPF program to socket: %v", err)
+		rcvr.logger.Sugar().Fatalf("Failed to attach BPF program to socket: %v", err)
 	}
 
 	reader, err := perf.NewReader(rcvr.objs.TcpEvents, 4096)
 	if err != nil {
-		rcvr.logger.Sugar().Fatal("Failed to create perf event reader: %v", err)
+		rcvr.logger.Sugar().Fatalf("Failed to create perf event reader: %v", err)
 	}
 	rcvr.eventReader = reader
 }
@@ -103,14 +103,14 @@ func (rcvr *ebpfReceiver) listen(ctx context.Context) func() {
 				{
 					record, err := rcvr.eventReader.Read()
 					if err != nil {
-						rcvr.logger.Sugar().Info("Error reading from perf buffer: %v", err)
+						rcvr.logger.Sugar().Infof("Error reading from perf buffer: %v", err)
 						continue
 					}
 
 					var event TcpEvent
 					err = binary.Read(bytes.NewBuffer(record.RawSample), binary.LittleEndian, &event)
 					if err != nil {
-						rcvr.logger.Sugar().Info("Failed to parse event: %v", err)
+						rcvr.logger.Sugar().Infof("Failed to parse event: %v", err)
 						continue
 					}
 
@@ -131,7 +131,7 @@ func (rcvr *ebpfReceiver) Shutdown(ctx context.Context) error {
 	rcvr.logger.Sugar().Info("Exiting...")
 	_ = rcvr.eventReader.Close()
 	if err := unix.SetsockoptInt(rcvr.sockFd, unix.SOL_SOCKET, unix.SO_DETACH_BPF, 0); err != nil {
-		rcvr.logger.Sugar().Fatal("Failed to detach BPF program: %v", err)
+		rcvr.logger.Sugar().Fatalf("Failed to detach BPF program: %v", err)
 	}
 	_ = syscall.Close(rcvr.sockFd)
 	rcvr.logger.Sugar().Info("Detached eBPF program.")
