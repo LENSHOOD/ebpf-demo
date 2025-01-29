@@ -7,6 +7,9 @@ dist:
 
 exporters:
   - gomod: go.opentelemetry.io/collector/exporter/debugexporter v0.117.0
+  - gomod: github.com/open-telemetry/otelcol-ebpf-demo/pg-exporter v0.0.1
+    name: "pgexporter"
+    path: ./pg-exporter
 
 processors:
   - gomod: go.opentelemetry.io/collector/processor/batchprocessor v0.117.0

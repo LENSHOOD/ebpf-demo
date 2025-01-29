@@ -9,13 +9,15 @@ processors:
 exporters:
   debug:
     verbosity: detailed
+  pg_exporter:
+    dsn: "postgres://postgres:password@postgres-service.monitoring:5432/testdb"
 
 service:
   pipelines:
     traces:
       receivers: [ebpf_receiver]
       processors: [batch]
-      exporters: [debug]
+      exporters: [debug, pg_exporter]
   telemetry:
     logs:
       level: debug

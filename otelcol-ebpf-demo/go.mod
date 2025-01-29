@@ -6,6 +6,7 @@ go 1.23.4
 
 require (
 	github.com/open-telemetry/otelcol-ebpf-demo/epbf-receiver v0.0.1
+	github.com/open-telemetry/otelcol-ebpf-demo/pg-exporter v0.0.1
 	go.opentelemetry.io/collector/component v0.117.0
 	go.opentelemetry.io/collector/confmap v1.23.0
 	go.opentelemetry.io/collector/confmap/provider/envprovider v1.18.0
@@ -40,6 +41,15 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.23.0 // indirect
 	github.com/hashicorp/go-version v1.7.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+	github.com/jackc/chunkreader/v2 v2.0.1 // indirect
+	github.com/jackc/pgconn v1.14.3 // indirect
+	github.com/jackc/pgio v1.0.0 // indirect
+	github.com/jackc/pgpassfile v1.0.0 // indirect
+	github.com/jackc/pgproto3/v2 v2.3.3 // indirect
+	github.com/jackc/pgservicefile v0.0.0-20221227161230-091c0ba34f0a // indirect
+	github.com/jackc/pgtype v1.14.0 // indirect
+	github.com/jackc/pgx/v4 v4.18.3 // indirect
+	github.com/jackc/puddle v1.3.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.17.11 // indirect
 	github.com/knadh/koanf/maps v0.1.1 // indirect
@@ -118,6 +128,7 @@ require (
 	go.opentelemetry.io/proto/otlp v1.3.1 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
+	golang.org/x/crypto v0.32.0 // indirect
 	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842 // indirect
 	golang.org/x/net v0.34.0 // indirect
 	golang.org/x/text v0.21.0 // indirect
@@ -130,3 +141,5 @@ require (
 )
 
 replace github.com/open-telemetry/otelcol-ebpf-demo/epbf-receiver v0.0.1 => /Users/ZhangXuhai/Work/code/ebpf-demo/ebpf-receiver
+
+replace github.com/open-telemetry/otelcol-ebpf-demo/pg-exporter v0.0.1 => /Users/ZhangXuhai/Work/code/ebpf-demo/pg-exporter
