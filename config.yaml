@@ -5,6 +5,19 @@ receivers:
 
 processors:
   batch:
+  k8sattributes:
+    auth_type: "serviceAccount"
+    passthrough: false
+    pod_association:
+      - sources:
+          - from: resource_attribute
+            name: k8s.pod.ip
+    extract:
+      metadata:
+        - k8s.pod.name
+        - k8s.deployment.name
+        - k8s.node.name
+        - k8s.namespace.name
 
 exporters:
   debug:
@@ -16,7 +29,7 @@ service:
   pipelines:
     traces:
       receivers: [ebpf_receiver]
-      processors: [batch]
+      processors: [batch, k8sattributes]
       exporters: [debug, pg_exporter]
   telemetry:
     logs:

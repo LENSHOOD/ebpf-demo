@@ -13,6 +13,7 @@ import (
 	debugexporter "go.opentelemetry.io/collector/exporter/debugexporter"
 	pgexporter "github.com/open-telemetry/otelcol-ebpf-demo/pg-exporter"
 	batchprocessor "go.opentelemetry.io/collector/processor/batchprocessor"
+	k8sattributesprocessor "github.com/open-telemetry/opentelemetry-collector-contrib/processor/k8sattributesprocessor"
 	ebpfreceiver "github.com/open-telemetry/otelcol-ebpf-demo/epbf-receiver"
 )
 
@@ -49,12 +50,14 @@ func components() (otelcol.Factories, error) {
 
 	factories.Processors, err = processor.MakeFactoryMap(
 		batchprocessor.NewFactory(),
+		k8sattributesprocessor.NewFactory(),
 	)
 	if err != nil {
 		return otelcol.Factories{}, err
 	}
 	factories.ProcessorModules = make(map[component.Type]string, len(factories.Processors))
 	factories.ProcessorModules[batchprocessor.NewFactory().Type()] = "go.opentelemetry.io/collector/processor/batchprocessor v0.117.0"
+	factories.ProcessorModules[k8sattributesprocessor.NewFactory().Type()] = "github.com/open-telemetry/opentelemetry-collector-contrib/processor/k8sattributesprocessor v0.117.0"
 
 	factories.Connectors, err = connector.MakeFactoryMap(
 	)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/jackc/pgx/v4/pgxpool"
+	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	"go.uber.org/zap"
 )
@@ -25,74 +26,85 @@ func (e *postgresExporter) pushTraces(ctx context.Context, td ptrace.Traces) err
 	resourceSpans := td.ResourceSpans()
 	for i := 0; i < resourceSpans.Len(); i++ {
 		resourceSpan := resourceSpans.At(i)
-		rs := resourceSpan.Resource()
-		srcIp, _ := rs.Attributes().Get("src.ip")
-		destIp, _ := rs.Attributes().Get("dest.ip")
-		destPort, _ := rs.Attributes().Get("dest.port")
-		_ = e.insertGraph(ctx, srcIp.AsString(), destIp.AsString(), destPort.Int())
+		if err := e.insertGraph(ctx, resourceSpan.Resource()); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-func (e *postgresExporter) insertGraph(ctx context.Context, srcIp string, destIp string, destPort int64) error {
-	if err := e.insertNode(ctx, srcIp); err != nil {
-		return fmt.Errorf("failed to insert srcIp into nodes: %w", err)
+func getStrFromRs(rs pcommon.Resource, key string) string {
+	v, exist := rs.Attributes().Get(key)
+	if !exist {
+		return ""
+	}
+	return v.AsString()
+}
+
+func (e *postgresExporter) insertGraph(ctx context.Context, rs pcommon.Resource) error {
+	srcIp := getStrFromRs(rs, "src.ip")
+	destIp := getStrFromRs(rs, "dest.ip")
+	_, _ = rs.Attributes().Get("dest.port")
+	ns := getStrFromRs(rs, "k8s.namespace.name")
+	deployName := getStrFromRs(rs, "k8s.deployment.name")
+	nodeName := getStrFromRs(rs, "k8s.node.name")
+	podName := getStrFromRs(rs, "k8s.pod.name")
+
+	if err := e.upsertNode(ctx, srcIp, destIp, ns, deployName, nodeName, podName); err != nil {
+		return fmt.Errorf("failed to upsert srcIp into nodes: %w", err)
 	}
 
-	if err := e.insertNode(ctx, destIp); err != nil {
-		return fmt.Errorf("failed to insert destIp into nodes: %w", err)
-	}
-
-	if err := e.insertEdge(ctx, srcIp, destIp); err != nil {
-		return fmt.Errorf("failed to insert edge into edges: %w", err)
+	if err := e.upsertEdge(ctx, srcIp, destIp); err != nil {
+		return fmt.Errorf("failed to upsert edge into edges: %w", err)
 	}
 
 	return nil
 }
 
-func (e *postgresExporter) insertNode(ctx context.Context, ip string) error {
-	e.logger.Sugar().Debugf("Try to insert node: %s", ip)
-	var exists bool
-	err := e.pool.QueryRow(ctx, `
-		SELECT EXISTS(SELECT 1 FROM nodes WHERE id = $1)
-	`, ip).Scan(&exists)
-	if err != nil {
-		return fmt.Errorf("failed to check if node exists: %w", err)
-	}
-
-	if !exists {
-		_, err := e.pool.Exec(ctx, `
+func (e *postgresExporter) upsertNode(ctx context.Context, srcIp string, destIp string, ns string, deployName string, nodeName string, podName string) error {
+	// upsert destination
+	_, err := e.pool.Exec(ctx, `
 			INSERT INTO nodes (id, mainstat)
 			VALUES ($1, $2)
-		`, ip, ip)
-		if err != nil {
-			return fmt.Errorf("failed to insert node: %w", err)
-		}
+			ON CONFLICT (id) 
+			DO UPDATE SET mainstat = $2
+		`, destIp, destIp)
+	if err != nil {
+		return fmt.Errorf("failed to upsert node: %w", err)
+	}
+
+	// upsert source
+	upsertNodeSql := `
+			INSERT INTO nodes (id, mainstat, secondarystat, title, subtitle)
+			VALUES ($1, $2, $3, $4, $5)
+			ON CONFLICT (id) 
+			DO UPDATE SET 
+			    mainstat = $2,
+			    secondarystat = $3,
+			    title = $4,
+			    subtitle = $5
+		`
+
+	_, err = e.pool.Exec(ctx, upsertNodeSql, srcIp, srcIp, podName+"_"+deployName, nodeName, ns)
+	if err != nil {
+		return fmt.Errorf("failed to upsert node: %w", err)
 	}
 
 	return nil
 }
 
-func (e *postgresExporter) insertEdge(ctx context.Context, srcIp, destIp string) error {
+func (e *postgresExporter) upsertEdge(ctx context.Context, srcIp, destIp string) error {
+	upsertEdgeSql := `
+			INSERT INTO edges (id, source, target, thickness)
+			VALUES ($1, $2, $3, 1)
+			ON CONFLICT (id) 
+			DO UPDATE SET thickness = LN(edges.thickness + 1) + 1;
+		`
+
 	edgeId := srcIp + "-" + destIp
-
-	e.logger.Sugar().Debugf("Try to insert edge: %s", edgeId)
-	var exists bool
-	err := e.pool.QueryRow(ctx, `
-		SELECT EXISTS(SELECT 1 FROM edges WHERE id = $1)
-	`, edgeId).Scan(&exists)
+	_, err := e.pool.Exec(ctx, upsertEdgeSql, edgeId, srcIp, destIp)
 	if err != nil {
-		return fmt.Errorf("failed to check if edge exists: %w", err)
-	}
-
-	if !exists {
-		_, err := e.pool.Exec(ctx, `
-			INSERT INTO edges (id, source, target)
-			VALUES ($1, $2, $3)
-		`, edgeId, srcIp, destIp)
-		if err != nil {
-			return fmt.Errorf("failed to insert edge: %w", err)
-		}
+		return fmt.Errorf("failed to insert edge: %w", err)
 	}
 
 	return nil

@@ -23,6 +23,10 @@ func generateEbpfTraces(tcpEvent *TcpEvent) ptrace.Traces {
 
 func fillResourceWithAttributes(resource *pcommon.Resource, event *TcpEvent) {
 	attrs := resource.Attributes()
+	// Here we set the "k8s.pod.ip" to be the same as the SrcIP, which helps the subsequent k8s processor in associating
+	// Pod metadata. The SrcIP is sufficient for associating all Pod's metadata, as both sides of Tcp packets are sniffed,
+	// regardless of whether a Pod is at the source or destination, all of them can be accounted at last.
+	attrs.PutStr("k8s.pod.ip", u32ToIPv4(ntoh(event.SrcIP)))
 	attrs.PutStr("src.ip", u32ToIPv4(ntoh(event.SrcIP)))
 	attrs.PutStr("dest.ip", u32ToIPv4(ntoh(event.DstIP)))
 	attrs.PutInt("dest.port", int64(ntohs(event.DstPort)))

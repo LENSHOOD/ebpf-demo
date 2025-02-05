@@ -13,6 +13,7 @@ exporters:
 
 processors:
   - gomod: go.opentelemetry.io/collector/processor/batchprocessor v0.117.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/k8sattributesprocessor v0.117.0
 
 receivers:
   - gomod: github.com/open-telemetry/otelcol-ebpf-demo/epbf-receiver v0.0.1

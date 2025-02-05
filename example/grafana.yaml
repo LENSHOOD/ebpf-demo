@@ -161,9 +161,10 @@ data:
           "id": 1,
           "options": {
             "edges": {},
-            "nodes": {}
+            "nodes": {},
+            "zoomMode": "cooperative"
           },
-          "pluginVersion": "11.4.0",
+          "pluginVersion": "11.5.1",
           "targets": [
             {
               "datasource": {
@@ -174,7 +175,7 @@ data:
               "format": "table",
               "hide": false,
               "rawSql": "SELECT * FROM nodes LIMIT 50 ",
-              "refId": "A",
+              "refId": "B",
               "sql": {
                 "columns": [
                   {
@@ -208,7 +209,7 @@ data:
               "format": "table",
               "hide": false,
               "rawSql": "SELECT * FROM edges LIMIT 50 ",
-              "refId": "B",
+              "refId": "A",
               "sql": {
                 "columns": [
                   {
