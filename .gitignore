@@ -109,7 +109,7 @@ go.work.sum
 .env
 
 # daemon file
-opentelemetry-collector
+ebpf-demo-collector
 
 # IDE
 .idea

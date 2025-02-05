@@ -9,11 +9,11 @@ import (
 	"math/rand"
 )
 
-func generateEbpfTraces(httpEvent *TcpEvent) ptrace.Traces {
+func generateEbpfTraces(tcpEvent *TcpEvent) ptrace.Traces {
 	traces := ptrace.NewTraces()
 	resourceSpan := traces.ResourceSpans().AppendEmpty()
-	httpResource := resourceSpan.Resource()
-	fillResourceWithAttributes(&httpResource, httpEvent)
+	tcpResource := resourceSpan.Resource()
+	fillResourceWithAttributes(&tcpResource, tcpEvent)
 
 	scope := appendScopeSpans(&resourceSpan)
 	appendTraceSpans(&scope)
@@ -54,7 +54,7 @@ func appendTraceSpans(scopeSpans *ptrace.ScopeSpans) {
 	span := scopeSpans.Spans().AppendEmpty()
 	span.SetTraceID(NewTraceID())
 	span.SetSpanID(NewSpanID())
-	span.SetName("http_event_span")
+	span.SetName("tcp_event_span")
 	span.SetKind(ptrace.SpanKindClient)
 	span.Status().SetCode(ptrace.StatusCodeOk)
 }
