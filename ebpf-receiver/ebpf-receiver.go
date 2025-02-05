@@ -11,6 +11,7 @@ import (
 	"go.opentelemetry.io/collector/consumer"
 	"go.uber.org/zap"
 	"golang.org/x/sys/unix"
+	"io"
 	"net"
 	"syscall"
 )
@@ -19,7 +20,7 @@ type TcpEvent struct {
 	SrcIP   uint32
 	DstIP   uint32
 	DstPort uint16
-	Data    [64]byte
+	Data    [20]byte
 }
 
 type BPFObjects struct {
@@ -103,19 +104,21 @@ func (rcvr *ebpfReceiver) listen(ctx context.Context) func() {
 				{
 					record, err := rcvr.eventReader.Read()
 					if err != nil {
-						rcvr.logger.Sugar().Infof("Error reading from perf buffer: %v", err)
+						rcvr.logger.Sugar().Errorf("Error reading from perf buffer: %v", err)
 						continue
 					}
 
 					var event TcpEvent
 					err = binary.Read(bytes.NewBuffer(record.RawSample), binary.LittleEndian, &event)
 					if err != nil {
-						rcvr.logger.Sugar().Infof("Failed to parse event: %v", err)
+						if err != io.EOF {
+							rcvr.logger.Sugar().Errorf("Failed to parse event: %v", err)
+						}
 						continue
 					}
 
-					httpData := bytes.Trim(event.Data[:], "\x00")
-					rcvr.logger.Sugar().Debugf("TCP Packaet: from %s, to %s, port: %d, pay load: %v\n", u32ToIPv4(ntoh(event.SrcIP)), u32ToIPv4(ntoh(event.DstIP)), ntohs(event.DstPort), httpData)
+					tcpData := bytes.Trim(event.Data[:], "\x00")
+					rcvr.logger.Sugar().Debugf("TCP Packaet: from %s, to %s, port: %d, pay load: %v\n", u32ToIPv4(ntoh(event.SrcIP)), u32ToIPv4(ntoh(event.DstIP)), ntohs(event.DstPort), tcpData)
 					_ = rcvr.nextConsumer.ConsumeTraces(ctx, generateEbpfTraces(&event))
 				}
 			}

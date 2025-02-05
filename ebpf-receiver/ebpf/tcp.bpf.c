@@ -8,7 +8,7 @@
 #include <bpf/bpf_helpers.h>
 #include <linux/if_ether.h>
 
-#define MAX_PACK_SIZE 64
+#define MAX_PACK_SIZE 20
 
 struct tcp_event_t {
     __u32 src_ip;
