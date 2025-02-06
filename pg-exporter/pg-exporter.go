@@ -8,6 +8,7 @@ import (
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	"go.uber.org/zap"
+	"os"
 )
 
 type postgresExporter struct {
@@ -20,6 +21,18 @@ func newPgExporter(cfg *PgExporterConfig, logger *zap.Logger) (*postgresExporter
 	if err != nil {
 		return nil, err
 	}
+
+	if cfg.DbInitSqlPath != "" {
+		initSql, err := os.ReadFile(cfg.DbInitSqlPath)
+		if err != nil {
+			logger.Sugar().Fatalf("Failed to init db: %v", err)
+		}
+
+		if _, err = pool.Exec(context.Background(), string(initSql)); err != nil {
+			logger.Sugar().Fatalf("Failed to init db: %v", err)
+		}
+	}
+
 	return &postgresExporter{logger: logger, pool: pool}, nil
 }
 

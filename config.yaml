@@ -1,6 +1,7 @@
 receivers:
   ebpf_receiver:
     ebpf_binary_path: "ebpf-receiver/ebpf/tcp.o"
+    ### Here we set the nic name that to be sniffed
     nic_name: "cni0"
 
 processors:
@@ -23,7 +24,10 @@ exporters:
   debug:
     verbosity: detailed
   pg_exporter:
+    ### Here we set Postgres' connection link
     dsn: "postgres://postgres:password@postgres-service.monitoring:5432/testdb"
+    ### Here we set the path of DB init sql script
+    db_init_sql_path: "db_init/init.sql"
 
 service:
   pipelines:
