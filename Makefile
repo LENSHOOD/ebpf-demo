@@ -18,7 +18,7 @@ $(BPF_OBJ): $(BPF_SRC)
 	@echo "Building eBPF program..."
 	$(CLANG) -g -O2 -target bpf -c $(BPF_SRC) -o $(BPF_OBJ)
 
-.PHONY: run-local build-image deploy clean
+.PHONY: run-local build-image deploy destroy setup-example destroy-example clean
 run-local:
 	$(GO) run ./$(GO_DIR) --config config.yaml
 
@@ -29,6 +29,15 @@ build-image:
 
 deploy:
 	$(KBCTL) apply -k .
+
+destroy:
+	$(KBCTL) delete -k .
+
+setup-example:
+	$(KBCTL) apply -k ./example/
+
+destroy-example:
+	$(KBCTL) delete -k ./example/
 
 clean:
 	rm -f $(BPF_OBJ)
