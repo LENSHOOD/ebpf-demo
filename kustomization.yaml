@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: kube-system
+
+resources:
+  - deploy/sa_role.yaml
+  - deploy/daemonset.yaml
+
+configMapGenerator:
+  - name: collector-config
+    files:
+      - config.yaml
+  - name: ebpf-bin
+    files:
+      - ebpf-receiver/ebpf/tcp.o
+  - name: db-init
+    files:
+      - pg-exporter/db_init/init.sql

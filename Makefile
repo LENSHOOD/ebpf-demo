@@ -18,7 +18,8 @@ $(BPF_OBJ): $(BPF_SRC)
 	@echo "Building eBPF program..."
 	$(CLANG) -g -O2 -target bpf -c $(BPF_SRC) -o $(BPF_OBJ)
 
-run:
+.PHONY: run-local build-image deploy clean
+run-local:
 	$(GO) run ./$(GO_DIR) --config config.yaml
 
 build-image:
@@ -27,7 +28,7 @@ build-image:
 	$(DOCKER) push localhost:5000/otel-ebpf-demo:latest
 
 deploy:
-	$(KBCTL) apply -f deploy.yaml
+	$(KBCTL) apply -k .
 
 clean:
 	rm -f $(BPF_OBJ)
