@@ -4,11 +4,11 @@ go 1.23.4
 
 require (
 	github.com/jackc/pgx/v4 v4.18.3
-	go.opentelemetry.io/collector/component v0.117.0
-	go.opentelemetry.io/collector/consumer v1.23.0
-	go.opentelemetry.io/collector/exporter v0.117.0
-	go.opentelemetry.io/collector/exporter/xexporter v0.117.0
-	go.opentelemetry.io/collector/pdata v1.23.0
+	go.opentelemetry.io/collector/component v0.119.0
+	go.opentelemetry.io/collector/consumer v1.25.0
+	go.opentelemetry.io/collector/exporter v0.119.0
+	go.opentelemetry.io/collector/exporter/xexporter v0.119.0
+	go.opentelemetry.io/collector/pdata v1.25.0
 	go.uber.org/zap v1.27.0
 )
 
