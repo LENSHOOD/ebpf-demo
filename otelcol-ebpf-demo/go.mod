@@ -179,6 +179,6 @@ require (
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
 
-replace github.com/open-telemetry/otelcol-ebpf-demo/epbf-receiver v0.0.1 => /mnt/hgfs/ZhangXuhai/Work/code/ebpf-demo/ebpf-receiver
+replace github.com/open-telemetry/otelcol-ebpf-demo/epbf-receiver v0.0.1 => ../ebpf-receiver
 
-replace github.com/open-telemetry/otelcol-ebpf-demo/pg-exporter v0.0.1 => /mnt/hgfs/ZhangXuhai/Work/code/ebpf-demo/pg-exporter
+replace github.com/open-telemetry/otelcol-ebpf-demo/pg-exporter v0.0.1 => ../pg-exporter
