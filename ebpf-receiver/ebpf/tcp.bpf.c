@@ -1,13 +1,7 @@
-#include <stddef.h>
-#include <linux/bpf.h>
-#include <linux/in.h>
-#include <linux/ip.h>
-#include <linux/tcp.h>
-#include <linux/string.h>
-#include <linux/filter.h>
+#include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
-#include <linux/if_ether.h>
 
+#define ETH_HLEN 14
 #define MAX_PACK_SIZE 20
 
 struct tcp_event_t {

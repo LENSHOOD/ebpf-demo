@@ -18,7 +18,7 @@ build-ebpf: $(BPF_OBJ)
 
 $(BPF_OBJ): $(BPF_SRC)
 	@echo "Building eBPF program..."
-	$(CLANG) -g -O2 -target bpf -c $(BPF_SRC) -o $(BPF_OBJ)
+	$(CLANG) -g -O2 -target bpf -D__TARGET_ARCH_x86 -c $(BPF_SRC) -o $(BPF_OBJ)
 
 .PHONY: run-local build-image deploy destroy setup-example destroy-example clean
 run-local:
