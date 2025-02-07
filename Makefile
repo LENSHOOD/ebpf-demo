@@ -1,10 +1,12 @@
 DOCKER = sudo docker
+DOCKER_REGISTRY = localhost:5000
 KBCTL = sudo kubectl
-CLANG = clang
+
 GO_ENV = env GOOS=linux
 GO = $(GO_ENV) go
 GO_DIR = otelcol-ebpf-demo
 
+CLANG = clang
 BPF_DIR = ebpf-receiver/ebpf
 BPF_SRC = $(BPF_DIR)/tcp.bpf.c
 BPF_OBJ = $(BPF_DIR)/tcp.o
@@ -24,8 +26,8 @@ run-local:
 
 build-image:
 	$(DOCKER) build -t otel-ebpf-demo:latest .
-	$(DOCKER) tag otel-ebpf-demo:latest localhost:5000/otel-ebpf-demo:latest
-	$(DOCKER) push localhost:5000/otel-ebpf-demo:latest
+	$(DOCKER) tag otel-ebpf-demo:latest $(DOCKER_REGISTRY)/otel-ebpf-demo:latest
+	$(DOCKER) push $(DOCKER_REGISTRY)/otel-ebpf-demo:latest
 
 deploy:
 	$(KBCTL) apply -k .
