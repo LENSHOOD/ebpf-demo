@@ -45,7 +45,8 @@ First, it attaches itself on a network interface to sniff all network traffic th
    - Linux kernel version > 5.x
    - Golang version > 1.20
 2. Build:
-   - `make build`
+   - OPTION-1 `make build-in-container` build in preset container, which is simpler and has no dependency problems 
+   - OPTION-2 `make build` build in your local env, which is more flexible for debugging
    - `make build-image` (Change `DOCKER_REGISTRY` in the makefile to your own registry)
 3. Configure:
    Open the `config.yaml`, and set the following two items,

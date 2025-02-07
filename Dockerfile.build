@@ -1,0 +1,9 @@
+FROM ubuntu:22.04
+
+RUN apt update && apt install -y curl make clang llvm gcc git libbpf-dev
+RUN curl -LO https://go.dev/dl/go1.23.6.linux-amd64.tar.gz && \
+    tar -C /usr/local -xzf go1.23.6.linux-amd64.tar.gz && \
+    rm go1.23.6.linux-amd64.tar.gz && \
+    export PATH=$PATH:/usr/local/go/bin
+ENV PATH="/usr/local/go/bin:${PATH}"
+RUN git config --global --add safe.directory /build
