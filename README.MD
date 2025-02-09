@@ -40,9 +40,15 @@ First, it attaches itself on a network interface to sniff all network traffic th
                                              K8s Node                                                
 ```
 
+This demo acts like the tcpdump that is capable of monitoring net traffic in a specific NIC. Essentially, there are plenty of [ebpf types](https://docs.ebpf.io/linux/program-type/BPF_PROG_TYPE_SOCKET_FILTER/) that are able to detect even manipulate net traffic. 
+
+For example, XDP can run on nic driver, which provides extremely high performance, while TC runs behind the XDP, but it can directly fetch skb instead of xdp context, which is easier to analyze protocol payload.
+
+In this very demo we chose the socket filter to monitor the net traffic. This technical derives from BPF that is way earlier than TC and XDP. That makes the linux kernels that after version 3.19 could all run the demo correctly. Besides, the socket filter needs a raw socket attach to a nic to monitor the traffic, it can only affect traffic that goes through this socket, any other socket bind to the nic won't be affected at all. This characteristic limits it to monitoring rather than modifying traffic.  
+
 ### Usage
 1. Preconditions:
-   - Linux kernel version > 5.x
+   - Linux kernel version > 3.19
    - Golang version > 1.20
 2. Build:
    - OPTION-1 `make build-in-container` build in preset container, which is simpler and has no dependency problems 
@@ -96,6 +102,3 @@ In the current example, according to the Bookinfo page, the deployment of the Bo
 And after setting up the example env, and operating a couple of times to access the Bookinfo, we could found the following node graph in the Grafana:
 
 ![](example/bookinfo-topology.png)
-
-### Implementation Details
-TBD
