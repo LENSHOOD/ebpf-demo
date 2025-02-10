@@ -2,11 +2,13 @@
 #include <bpf/bpf_helpers.h>
 
 #define ETH_HLEN 14
-#define MAX_PACK_SIZE 20
+#define MAX_PACK_SIZE 64
 
 struct tcp_event_t {
+    __u64 timestamp_ns;
     __u32 src_ip;
     __u32 dst_ip;
+    __u16 src_port;
     __u16 dst_port;
     char data[MAX_PACK_SIZE];
 };
@@ -39,6 +41,7 @@ int net_filter(struct __sk_buff *skb) {
         return 0;
     }
 
+    event.src_port = tcp.source;
     event.dst_port = tcp.dest;
     offset += tcp.doff * 4;
 
@@ -46,6 +49,7 @@ int net_filter(struct __sk_buff *skb) {
         return 0;
     }
 
+    event.timestamp_ns = bpf_ktime_get_ns();
     __builtin_memcpy(event.data, packet_body, sizeof(packet_body));
     bpf_perf_event_output(skb, &tcp_events, BPF_F_CURRENT_CPU, &event, sizeof(event));
 
