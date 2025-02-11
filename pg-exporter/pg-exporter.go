@@ -2,6 +2,7 @@ package pg_exporter
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/jackc/pgx/v4/pgxpool"
 	ebpfreceiver "github.com/open-telemetry/otelcol-ebpf-demo/epbf-receiver"
@@ -9,6 +10,7 @@ import (
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	"go.uber.org/zap"
 	"os"
+	"strconv"
 )
 
 type postgresExporter struct {
@@ -65,9 +67,9 @@ func (e *postgresExporter) insertGraph(ctx context.Context, rss ptrace.ResourceS
 		rs := rss.At(i).Resource()
 		kind := ebpfreceiver.Kind(getIntFromRs(rs, ebpfreceiver.DirectionKey))
 		switch kind {
-		case ebpfreceiver.NODE_SRC:
+		case ebpfreceiver.NodeSrc:
 			fallthrough
-		case ebpfreceiver.NODE_DEST:
+		case ebpfreceiver.NodeDest:
 			ip := getStrFromRs(rs, ebpfreceiver.MetadataIp)
 			ns := getStrFromRs(rs, ebpfreceiver.MetadataNS)
 			deployName := getStrFromRs(rs, ebpfreceiver.MetadataDeployName)
@@ -78,12 +80,45 @@ func (e *postgresExporter) insertGraph(ctx context.Context, rss ptrace.ResourceS
 			if err := e.upsertNode(ctx, ip, ns, deployName, nodeName, podName); err != nil {
 				return fmt.Errorf("failed to upsert into nodes: %w", err)
 			}
-		case ebpfreceiver.EDGE:
+		case ebpfreceiver.Body:
 			srcIp := getStrFromRs(rs, ebpfreceiver.MetadataSrc)
 			destIp := getStrFromRs(rs, ebpfreceiver.MetadataDest)
 			e.logger.Sugar().Debugf("Insert Edge: %s - %s", srcIp, destIp)
 			if err := e.upsertEdge(ctx, srcIp, destIp); err != nil {
 				return fmt.Errorf("failed to upsert edge into edges: %w", err)
+			}
+
+			srcPort := getStrFromRs(rs, ebpfreceiver.MetadataSrcPort)
+			destPort := getStrFromRs(rs, ebpfreceiver.MetadataDestPort)
+			trafficType := ebpfreceiver.TT(getIntFromRs(rs, ebpfreceiver.TrafficType))
+
+			var existingPayload []byte
+			query := `SELECT payload FROM net_traces WHERE src_ip = $1 AND src_port = $2 AND dest_ip = $3 AND dest_port = $4`
+			if err := e.pool.QueryRow(ctx, query, srcIp, srcPort, destIp, destPort).Scan(&existingPayload); err != nil {
+				payload, err := e.buildPayload(trafficType, rs, []byte{})
+				if err != nil {
+					e.logger.Sugar().Errorf("Failed to build payload: %v", err)
+				}
+
+				protocol := "UNKNOWN"
+				if trafficType == ebpfreceiver.HTTP_REQ || trafficType == ebpfreceiver.HTTP_RESP {
+					protocol = "HTTP"
+				}
+				insertSQL := `INSERT INTO net_traces (src_ip, src_port, dest_ip, dest_port, protocol, payload) 
+					  VALUES ($1, $2, $3, $4, $5, $6)`
+				if _, err := e.pool.Exec(ctx, insertSQL, srcIp, srcPort, destIp, destPort, protocol, payload); err != nil {
+					return fmt.Errorf("failed to insert into net_traces: %w", err)
+				}
+			}
+
+			payload, err := e.buildPayload(trafficType, rs, existingPayload)
+			if err != nil {
+				e.logger.Sugar().Errorf("Failed to build payload: %v", err)
+			}
+
+			updateSQL := `UPDATE net_traces SET payload = $1 WHERE src_ip = $2 AND src_port = $3 AND dest_ip = $4 AND dest_port = $5`
+			if _, err := e.pool.Exec(ctx, updateSQL, payload, srcIp, srcPort, destIp, destPort); err != nil {
+				return fmt.Errorf("failed to insert into net_traces: %w", err)
 			}
 		}
 	}
@@ -126,6 +161,49 @@ func (e *postgresExporter) upsertEdge(ctx context.Context, srcIp, destIp string)
 	}
 
 	return nil
+}
+
+type HttpStruct struct {
+	Method  string `json:"method"`
+	Uri     string `json:"uri"`
+	Version string `json:"version"`
+	Status  string `json:"status"`
+	Content string `json:"content"`
+	Start   string `json:"start"`
+	End     string `json:"end"`
+}
+
+func (e *postgresExporter) buildPayload(tt ebpfreceiver.TT, rs pcommon.Resource, existingPayload []byte) ([]byte, error) {
+	switch tt {
+	case ebpfreceiver.HTTP_REQ:
+		http := HttpStruct{}
+		if len(existingPayload) != 0 {
+			if err := json.Unmarshal(existingPayload, &http); err != nil {
+				return []byte{}, fmt.Errorf("unmarshal error: %v", err)
+			}
+		}
+		http.Start = strconv.FormatInt(getIntFromRs(rs, ebpfreceiver.Timestamp), 10)
+		http.Uri = getStrFromRs(rs, ebpfreceiver.HttpUri)
+		http.Method = getStrFromRs(rs, ebpfreceiver.HttpMethod)
+		http.Version = getStrFromRs(rs, ebpfreceiver.HttpVersion)
+		return json.Marshal(http)
+
+	case ebpfreceiver.HTTP_RESP:
+		http := HttpStruct{}
+		if len(existingPayload) != 0 {
+			if err := json.Unmarshal(existingPayload, &http); err != nil {
+				return []byte{}, fmt.Errorf("unmarshal error: %v", err)
+			}
+		}
+		http.End = strconv.FormatInt(getIntFromRs(rs, ebpfreceiver.Timestamp), 10)
+		http.Status = getStrFromRs(rs, ebpfreceiver.HttpStatus)
+		return json.Marshal(http)
+
+	case ebpfreceiver.UNKNOWN:
+		fallthrough
+	default:
+		return existingPayload, nil
+	}
 }
 
 func (e *postgresExporter) Shutdown(ctx context.Context) error {

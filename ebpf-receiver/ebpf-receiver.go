@@ -17,10 +17,12 @@ import (
 )
 
 type TcpEvent struct {
-	SrcIP   uint32
-	DstIP   uint32
-	DstPort uint16
-	Data    [20]byte
+	TimestampNs uint64
+	SrcIP       uint32
+	DstIP       uint32
+	SrcPort     uint16
+	DstPort     uint16
+	Data        [64]byte
 }
 
 type BPFObjects struct {
