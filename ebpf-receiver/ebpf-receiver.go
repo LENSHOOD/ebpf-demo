@@ -13,6 +13,7 @@ import (
 	"golang.org/x/sys/unix"
 	"io"
 	"net"
+	"regexp"
 	"syscall"
 )
 
@@ -119,6 +120,10 @@ func (rcvr *ebpfReceiver) listen(ctx context.Context) func() {
 						continue
 					}
 
+					if !allows(rcvr.config.IpFilter, event) {
+						continue
+					}
+
 					tcpData := bytes.Trim(event.Data[:], "\x00")
 					rcvr.logger.Sugar().Debugf("TCP Packaet: from %s, to %s, port: %d, pay load: %v\n", u32ToIPv4(ntoh(event.SrcIP)), u32ToIPv4(ntoh(event.DstIP)), ntohs(event.DstPort), tcpData)
 					_ = rcvr.nextConsumer.ConsumeTraces(ctx, generateEbpfTraces(&event))
@@ -126,6 +131,12 @@ func (rcvr *ebpfReceiver) listen(ctx context.Context) func() {
 			}
 		}
 	}
+}
+
+func allows(filter string, event TcpEvent) bool {
+	ip := u32ToIPv4(ntoh(event.SrcIP))
+	re := regexp.MustCompile(filter)
+	return re.MatchString(ip)
 }
 
 func (rcvr *ebpfReceiver) Shutdown(ctx context.Context) error {
