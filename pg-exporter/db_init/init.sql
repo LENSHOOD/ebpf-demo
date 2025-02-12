@@ -14,11 +14,11 @@ CREATE TABLE IF NOT EXISTS edges (
 );
 
 CREATE TABLE IF NOT EXISTS net_traces (
+    id BIGINT PRIMARY KEY,
     src_ip INET,
     src_port INT,
     dest_ip INET,
     dest_port INT,
     protocol VARCHAR(30),
-    payload JSON,
-    PRIMARY KEY (src_ip, src_port, dest_ip, dest_port)
+    payload JSON
 );

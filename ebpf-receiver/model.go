@@ -34,6 +34,7 @@ const (
 	HTTP_RESP
 )
 
+const MetadataTrafficIdentifier = "traffic.identifier"
 const MetadataIp = "k8s.pod.ip"
 const MetadataSrc = "src.ip"
 const MetadataDest = "dest.ip"
@@ -87,6 +88,7 @@ func fillResourceWithAttributes(resource *pcommon.Resource, event *TcpEvent, dir
 	case Body:
 		data := event.Data[:]
 		attrs.PutStr(BodyContent, string(data))
+		attrs.PutInt(MetadataTrafficIdentifier, buildTrafficIdentifier(event))
 		attrs.PutStr(MetadataSrc, u32ToIPv4(ntoh(event.SrcIP)))
 		attrs.PutStr(MetadataDest, u32ToIPv4(ntoh(event.DstIP)))
 		attrs.PutInt(MetadataSrcPort, int64(ntohs(event.SrcPort)))
@@ -125,6 +127,19 @@ func fillResourceWithAttributes(resource *pcommon.Resource, event *TcpEvent, dir
 			}
 		}
 	}
+}
+
+func buildTrafficIdentifier(event *TcpEvent) int64 {
+	minIP, minPort, maxIP, maxPort := ntoh(event.SrcIP), ntohs(event.SrcPort), ntoh(event.DstIP), ntohs(event.DstPort)
+	if minIP > maxIP {
+		minIP, maxIP = maxIP, minIP
+	}
+
+	if minPort > maxPort {
+		minPort, maxPort = maxPort, minPort
+	}
+
+	return int64(minIP)<<48 | int64(minPort)<<32 | int64(maxIP)<<16 | int64(maxPort)
 }
 
 func appendScopeSpans(resourceSpans *ptrace.ResourceSpans) ptrace.ScopeSpans {

@@ -81,6 +81,7 @@ func (e *postgresExporter) insertGraph(ctx context.Context, rss ptrace.ResourceS
 				return fmt.Errorf("failed to upsert into nodes: %w", err)
 			}
 		case ebpfreceiver.Body:
+			id := getIntFromRs(rs, ebpfreceiver.MetadataTrafficIdentifier)
 			srcIp := getStrFromRs(rs, ebpfreceiver.MetadataSrc)
 			destIp := getStrFromRs(rs, ebpfreceiver.MetadataDest)
 			e.logger.Sugar().Debugf("Insert Edge: %s - %s", srcIp, destIp)
@@ -93,8 +94,8 @@ func (e *postgresExporter) insertGraph(ctx context.Context, rss ptrace.ResourceS
 			trafficType := ebpfreceiver.TT(getIntFromRs(rs, ebpfreceiver.TrafficType))
 
 			var existingPayload []byte
-			query := `SELECT payload FROM net_traces WHERE src_ip = $1 AND src_port = $2 AND dest_ip = $3 AND dest_port = $4`
-			if err := e.pool.QueryRow(ctx, query, srcIp, srcPort, destIp, destPort).Scan(&existingPayload); err != nil {
+			query := `SELECT payload FROM net_traces WHERE id = $1`
+			if err := e.pool.QueryRow(ctx, query, id).Scan(&existingPayload); err != nil {
 				payload, err := e.buildPayload(trafficType, rs, []byte{})
 				if err != nil {
 					e.logger.Sugar().Errorf("Failed to build payload: %v", err)
@@ -104,9 +105,9 @@ func (e *postgresExporter) insertGraph(ctx context.Context, rss ptrace.ResourceS
 				if trafficType == ebpfreceiver.HTTP_REQ || trafficType == ebpfreceiver.HTTP_RESP {
 					protocol = "HTTP"
 				}
-				insertSQL := `INSERT INTO net_traces (src_ip, src_port, dest_ip, dest_port, protocol, payload) 
-					  VALUES ($1, $2, $3, $4, $5, $6)`
-				if _, err := e.pool.Exec(ctx, insertSQL, srcIp, srcPort, destIp, destPort, protocol, payload); err != nil {
+				insertSQL := `INSERT INTO net_traces (id, src_ip, src_port, dest_ip, dest_port, protocol, payload) 
+					  VALUES ($1, $2, $3, $4, $5, $6, $7)`
+				if _, err := e.pool.Exec(ctx, insertSQL, id, srcIp, srcPort, destIp, destPort, protocol, payload); err != nil {
 					return fmt.Errorf("failed to insert into net_traces: %w", err)
 				}
 			}
@@ -116,9 +117,9 @@ func (e *postgresExporter) insertGraph(ctx context.Context, rss ptrace.ResourceS
 				e.logger.Sugar().Errorf("Failed to build payload: %v", err)
 			}
 
-			updateSQL := `UPDATE net_traces SET payload = $1 WHERE src_ip = $2 AND src_port = $3 AND dest_ip = $4 AND dest_port = $5`
-			if _, err := e.pool.Exec(ctx, updateSQL, payload, srcIp, srcPort, destIp, destPort); err != nil {
-				return fmt.Errorf("failed to insert into net_traces: %w", err)
+			updateSQL := `UPDATE net_traces SET payload = $1 WHERE id = $2`
+			if _, err := e.pool.Exec(ctx, updateSQL, payload, id); err != nil {
+				return fmt.Errorf("failed to update net_traces: %w", err)
 			}
 		}
 	}
@@ -164,13 +165,14 @@ func (e *postgresExporter) upsertEdge(ctx context.Context, srcIp, destIp string)
 }
 
 type HttpStruct struct {
-	Method  string `json:"method"`
-	Uri     string `json:"uri"`
-	Version string `json:"version"`
-	Status  string `json:"status"`
-	Content string `json:"content"`
-	Start   string `json:"start"`
-	End     string `json:"end"`
+	Method      string `json:"method"`
+	Uri         string `json:"uri"`
+	Version     string `json:"version"`
+	Status      string `json:"status"`
+	ReqContent  string `json:"req_content"`
+	RespContent string `json:"resp_content"`
+	Start       string `json:"start"`
+	End         string `json:"end"`
 }
 
 func (e *postgresExporter) buildPayload(tt ebpfreceiver.TT, rs pcommon.Resource, existingPayload []byte) ([]byte, error) {
@@ -186,6 +188,7 @@ func (e *postgresExporter) buildPayload(tt ebpfreceiver.TT, rs pcommon.Resource,
 		http.Uri = getStrFromRs(rs, ebpfreceiver.HttpUri)
 		http.Method = getStrFromRs(rs, ebpfreceiver.HttpMethod)
 		http.Version = getStrFromRs(rs, ebpfreceiver.HttpVersion)
+		http.ReqContent = getStrFromRs(rs, ebpfreceiver.BodyContent)
 		return json.Marshal(http)
 
 	case ebpfreceiver.HTTP_RESP:
@@ -197,6 +200,7 @@ func (e *postgresExporter) buildPayload(tt ebpfreceiver.TT, rs pcommon.Resource,
 		}
 		http.End = strconv.FormatInt(getIntFromRs(rs, ebpfreceiver.Timestamp), 10)
 		http.Status = getStrFromRs(rs, ebpfreceiver.HttpStatus)
+		http.RespContent = getStrFromRs(rs, ebpfreceiver.BodyContent)
 		return json.Marshal(http)
 
 	case ebpfreceiver.UNKNOWN:
