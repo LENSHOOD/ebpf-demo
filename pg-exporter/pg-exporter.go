@@ -81,7 +81,6 @@ func (e *postgresExporter) insertGraph(ctx context.Context, rss ptrace.ResourceS
 				return fmt.Errorf("failed to upsert into nodes: %w", err)
 			}
 		case ebpfreceiver.Body:
-			id := getIntFromRs(rs, ebpfreceiver.MetadataTrafficIdentifier)
 			srcIp := getStrFromRs(rs, ebpfreceiver.MetadataSrc)
 			destIp := getStrFromRs(rs, ebpfreceiver.MetadataDest)
 			e.logger.Sugar().Debugf("Insert Edge: %s - %s", srcIp, destIp)
@@ -89,37 +88,12 @@ func (e *postgresExporter) insertGraph(ctx context.Context, rss ptrace.ResourceS
 				return fmt.Errorf("failed to upsert edge into edges: %w", err)
 			}
 
-			srcPort := getStrFromRs(rs, ebpfreceiver.MetadataSrcPort)
-			destPort := getStrFromRs(rs, ebpfreceiver.MetadataDestPort)
-			trafficType := ebpfreceiver.TT(getIntFromRs(rs, ebpfreceiver.TrafficType))
+			srcPort := getIntFromRs(rs, ebpfreceiver.MetadataSrcPort)
+			destPort := getIntFromRs(rs, ebpfreceiver.MetadataDestPort)
 
-			var existingPayload []byte
-			query := `SELECT payload FROM net_traces WHERE id = $1`
-			if err := e.pool.QueryRow(ctx, query, id).Scan(&existingPayload); err != nil {
-				payload, err := e.buildPayload(trafficType, rs, []byte{})
-				if err != nil {
-					e.logger.Sugar().Errorf("Failed to build payload: %v", err)
-				}
-
-				protocol := "UNKNOWN"
-				if trafficType == ebpfreceiver.HTTP_REQ || trafficType == ebpfreceiver.HTTP_RESP {
-					protocol = "HTTP"
-				}
-				insertSQL := `INSERT INTO net_traces (id, src_ip, src_port, dest_ip, dest_port, protocol, payload) 
-					  VALUES ($1, $2, $3, $4, $5, $6, $7)`
-				if _, err := e.pool.Exec(ctx, insertSQL, id, srcIp, srcPort, destIp, destPort, protocol, payload); err != nil {
-					return fmt.Errorf("failed to insert into net_traces: %w", err)
-				}
-			}
-
-			payload, err := e.buildPayload(trafficType, rs, existingPayload)
-			if err != nil {
-				e.logger.Sugar().Errorf("Failed to build payload: %v", err)
-			}
-
-			updateSQL := `UPDATE net_traces SET payload = $1 WHERE id = $2`
-			if _, err := e.pool.Exec(ctx, updateSQL, payload, id); err != nil {
-				return fmt.Errorf("failed to update net_traces: %w", err)
+			e.logger.Sugar().Debugf("Insert Net Traces: %s:%d - %s:%d", srcIp, srcPort, destIp, destPort)
+			if err := e.upsertBody(ctx, rs, srcIp, srcPort, destIp, destPort); err != nil {
+				return fmt.Errorf("failed to upsert body into net_traces: %w", err)
 			}
 		}
 	}
@@ -164,11 +138,68 @@ func (e *postgresExporter) upsertEdge(ctx context.Context, srcIp, destIp string)
 	return nil
 }
 
+func (e *postgresExporter) upsertBody(ctx context.Context, rs pcommon.Resource, srcIp string, srcPort int64, destIp string, destPort int64) error {
+	trafficType := ebpfreceiver.TT(getIntFromRs(rs, ebpfreceiver.TrafficType))
+	id := getIntFromRs(rs, ebpfreceiver.MetadataTrafficIdentifier)
+
+	var existingPayload []byte
+	query := `SELECT payload FROM net_traces WHERE id = $1`
+	if err := e.pool.QueryRow(ctx, query, id).Scan(&existingPayload); err != nil {
+		payload, err := e.buildPayload(trafficType, rs, []byte{})
+		if err != nil {
+			e.logger.Sugar().Errorf("Failed to build payload: %v", err)
+		}
+
+		protocol := "UNKNOWN"
+		switch trafficType {
+		case ebpfreceiver.TCP:
+			protocol = "TCP"
+		case ebpfreceiver.UDP:
+			protocol = "UDP"
+		case ebpfreceiver.HTTP_REQ:
+			fallthrough
+		case ebpfreceiver.HTTP_RESP:
+			protocol = "HTTP"
+		case ebpfreceiver.DNS_REQ:
+			fallthrough
+		case ebpfreceiver.DNS_RESP:
+			protocol = "DNS"
+		}
+
+		insertSQL := `INSERT INTO net_traces (id, src_ip, src_port, dest_ip, dest_port, protocol, payload) 
+					  VALUES ($1, $2, $3, $4, $5, $6, $7)`
+		if _, err := e.pool.Exec(ctx, insertSQL, id, srcIp, srcPort, destIp, destPort, protocol, payload); err != nil {
+			return fmt.Errorf("failed to insert into net_traces: %w", err)
+		}
+
+		return nil
+	}
+
+	payload, err := e.buildPayload(trafficType, rs, existingPayload)
+	if err != nil {
+		e.logger.Sugar().Errorf("Failed to build payload: %v", err)
+	}
+
+	updateSQL := `UPDATE net_traces SET payload = $1 WHERE id = $2`
+	if _, err := e.pool.Exec(ctx, updateSQL, payload, id); err != nil {
+		return fmt.Errorf("failed to update net_traces: %w", err)
+	}
+
+	return nil
+}
+
 type HttpStruct struct {
 	Method      string `json:"method"`
 	Uri         string `json:"uri"`
 	Version     string `json:"version"`
 	Status      string `json:"status"`
+	ReqContent  string `json:"req_content"`
+	RespContent string `json:"resp_content"`
+	Start       string `json:"start"`
+	End         string `json:"end"`
+}
+
+type DnsStruct struct {
 	ReqContent  string `json:"req_content"`
 	RespContent string `json:"resp_content"`
 	Start       string `json:"start"`
@@ -203,10 +234,28 @@ func (e *postgresExporter) buildPayload(tt ebpfreceiver.TT, rs pcommon.Resource,
 		http.RespContent = getStrFromRs(rs, ebpfreceiver.BodyContent)
 		return json.Marshal(http)
 
-	case ebpfreceiver.UNKNOWN:
-		fallthrough
+	case ebpfreceiver.DNS_REQ:
+		dns := DnsStruct{}
+		if len(existingPayload) != 0 {
+			if err := json.Unmarshal(existingPayload, &dns); err != nil {
+				return []byte{}, fmt.Errorf("unmarshal error: %v", err)
+			}
+		}
+		dns.Start = strconv.FormatInt(getIntFromRs(rs, ebpfreceiver.Timestamp), 10)
+		dns.ReqContent = getStrFromRs(rs, ebpfreceiver.BodyContent)
+		return json.Marshal(dns)
+	case ebpfreceiver.DNS_RESP:
+		dns := DnsStruct{}
+		if len(existingPayload) != 0 {
+			if err := json.Unmarshal(existingPayload, &dns); err != nil {
+				return []byte{}, fmt.Errorf("unmarshal error: %v", err)
+			}
+		}
+		dns.End = strconv.FormatInt(getIntFromRs(rs, ebpfreceiver.Timestamp), 10)
+		dns.RespContent = getStrFromRs(rs, ebpfreceiver.BodyContent)
+		return json.Marshal(dns)
 	default:
-		return existingPayload, nil
+		return json.Marshal("")
 	}
 }
 

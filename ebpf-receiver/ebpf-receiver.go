@@ -17,8 +17,9 @@ import (
 	"syscall"
 )
 
-type TcpEvent struct {
+type L4Event struct {
 	TimestampNs uint64
+	Protocol    uint32
 	SrcIP       uint32
 	DstIP       uint32
 	SrcPort     uint16
@@ -27,8 +28,8 @@ type TcpEvent struct {
 }
 
 type BPFObjects struct {
-	TcpEvents *ebpf.Map     `ebpf:"tcp_events"`
-	Prog      *ebpf.Program `ebpf:"net_filter"`
+	L4Events *ebpf.Map     `ebpf:"l4_events"`
+	Prog     *ebpf.Program `ebpf:"net_filter"`
 }
 
 type ebpfReceiver struct {
@@ -50,7 +51,7 @@ func (rcvr *ebpfReceiver) Start(ctx context.Context, host component.Host) error 
 
 	rcvr.loadEbpfProgram(rcvr.config.EbpfBinPath, rcvr.config.NicName)
 
-	rcvr.logger.Sugar().Info("Listening for TCP traffic...")
+	rcvr.logger.Sugar().Info("Listening for L4 traffic...")
 
 	go rcvr.listen(ctx)()
 
@@ -101,7 +102,7 @@ func (rcvr *ebpfReceiver) loadEbpfProgram(binPath string, nicName string) {
 		rcvr.logger.Sugar().Fatalf("Failed to attach BPF program to socket: %v", err)
 	}
 
-	reader, err := perf.NewReader(rcvr.objs.TcpEvents, 4096)
+	reader, err := perf.NewReader(rcvr.objs.L4Events, 4096)
 	if err != nil {
 		rcvr.logger.Sugar().Fatalf("Failed to create perf event reader: %v", err)
 	}
@@ -122,8 +123,8 @@ func (rcvr *ebpfReceiver) listen(ctx context.Context) func() {
 						continue
 					}
 
-					var event TcpEvent
-					err = binary.Read(bytes.NewBuffer(record.RawSample), binary.LittleEndian, &event)
+					var event L4Event
+					err = binary.Read(bytes.NewBuffer(record.RawSample), HostOrder, &event)
 					if err != nil {
 						if err != io.EOF {
 							rcvr.logger.Sugar().Errorf("Failed to parse event: %v", err)
@@ -135,8 +136,7 @@ func (rcvr *ebpfReceiver) listen(ctx context.Context) func() {
 						continue
 					}
 
-					tcpData := bytes.Trim(event.Data[:], "\x00")
-					rcvr.logger.Sugar().Debugf("TCP Packaet: from %s, to %s, port: %d, pay load: %v\n", u32ToIPv4(ntoh(event.SrcIP)), u32ToIPv4(ntoh(event.DstIP)), ntohs(event.DstPort), tcpData)
+					rcvr.logger.Sugar().Debugf("TCP Packaet: from %s:%d, to %s:%d, protocal: %d\n", u32ToIPv4(ntoh(event.SrcIP)), ntohs(event.SrcPort), u32ToIPv4(ntoh(event.DstIP)), ntohs(event.DstPort), event.Protocol)
 					_ = rcvr.nextConsumer.ConsumeTraces(ctx, generateEbpfTraces(&event))
 				}
 			}
@@ -144,7 +144,7 @@ func (rcvr *ebpfReceiver) listen(ctx context.Context) func() {
 	}
 }
 
-func allows(filter string, event TcpEvent) bool {
+func allows(filter string, event L4Event) bool {
 	ip := u32ToIPv4(ntoh(event.SrcIP))
 	re := regexp.MustCompile(filter)
 	return re.MatchString(ip)
@@ -169,7 +169,7 @@ func (rcvr *ebpfReceiver) Shutdown(ctx context.Context) error {
 
 	_ = syscall.Close(rcvr.sockFd)
 	rcvr.logger.Sugar().Info("Detached eBPF program.")
-	_ = rcvr.objs.TcpEvents.Close()
+	_ = rcvr.objs.L4Events.Close()
 	_ = rcvr.objs.Prog.Close()
 	rcvr.logger.Sugar().Info("Exited")
 

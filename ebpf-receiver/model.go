@@ -8,6 +8,8 @@ import (
 	"github.com/google/uuid"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/ptrace"
+	"golang.org/x/net/dns/dnsmessage"
+	"golang.org/x/sys/unix"
 	"math/rand"
 	"strings"
 )
@@ -29,9 +31,12 @@ const TrafficType = "traffic.type"
 type TT int
 
 const (
-	UNKNOWN = iota
+	TCP TT = iota
+	UDP
 	HTTP_REQ
 	HTTP_RESP
+	DNS_REQ
+	DNS_RESP
 )
 
 const MetadataTrafficIdentifier = "traffic.identifier"
@@ -51,32 +56,32 @@ const HttpVersion = "Version"
 const HttpStatus = "Status"
 const BodyContent = "Content"
 
-func generateEbpfTraces(tcpEvent *TcpEvent) ptrace.Traces {
+func generateEbpfTraces(l4Event *L4Event) ptrace.Traces {
 	traces := ptrace.NewTraces()
 	traceId := NewTraceID()
 
 	srcRsSpan := traces.ResourceSpans().AppendEmpty()
 	srcRs := srcRsSpan.Resource()
-	fillResourceWithAttributes(&srcRs, tcpEvent, NodeSrc)
+	fillResourceWithAttributes(&srcRs, l4Event, NodeSrc)
 	srcScope := appendScopeSpans(&srcRsSpan)
 	appendTraceSpans(&srcScope, traceId, SrcSpanName)
 
 	destRsSpan := traces.ResourceSpans().AppendEmpty()
 	destRs := destRsSpan.Resource()
-	fillResourceWithAttributes(&destRs, tcpEvent, NodeDest)
+	fillResourceWithAttributes(&destRs, l4Event, NodeDest)
 	destScope := appendScopeSpans(&destRsSpan)
 	appendTraceSpans(&destScope, traceId, DestSpanName)
 
 	bodyRsSpan := traces.ResourceSpans().AppendEmpty()
 	bodyRs := bodyRsSpan.Resource()
-	fillResourceWithAttributes(&bodyRs, tcpEvent, Body)
+	fillResourceWithAttributes(&bodyRs, l4Event, Body)
 	bodyScope := appendScopeSpans(&bodyRsSpan)
 	appendTraceSpans(&bodyScope, traceId, BodySpanName)
 
 	return traces
 }
 
-func fillResourceWithAttributes(resource *pcommon.Resource, event *TcpEvent, direction Kind) {
+func fillResourceWithAttributes(resource *pcommon.Resource, event *L4Event, direction Kind) {
 	attrs := resource.Attributes()
 	attrs.PutInt(Timestamp, int64(event.TimestampNs))
 	attrs.PutInt(DirectionKey, int64(direction))
@@ -94,42 +99,69 @@ func fillResourceWithAttributes(resource *pcommon.Resource, event *TcpEvent, dir
 		attrs.PutInt(MetadataSrcPort, int64(ntohs(event.SrcPort)))
 		attrs.PutInt(MetadataDestPort, int64(ntohs(event.DstPort)))
 
-		attrs.PutInt(TrafficType, UNKNOWN)
-		scanner := bufio.NewScanner(bytes.NewReader(data))
-		if !scanner.Scan() {
-			return
-		}
-
-		firstLine := scanner.Text()
-		parts := strings.Fields(firstLine)
-		if len(parts) < 3 {
-			return
-		}
-
-		firstSegment := parts[0]
-		if strings.HasPrefix(firstSegment, "HTTP") {
-			attrs.PutInt(TrafficType, HTTP_RESP)
-			attrs.PutStr(HttpVersion, firstSegment)
-			attrs.PutStr(HttpStatus, parts[1]+" "+parts[2])
-		}
-
-		if strings.HasPrefix(firstSegment, "GET") ||
-			strings.HasPrefix(firstSegment, "POST") ||
-			strings.HasPrefix(firstSegment, "PUT") ||
-			strings.HasPrefix(firstSegment, "DELE") ||
-			strings.HasPrefix(firstSegment, "HEAD") ||
-			strings.HasPrefix(firstSegment, "OPTI") {
-			{
-				attrs.PutInt(TrafficType, HTTP_REQ)
-				attrs.PutStr(HttpMethod, firstSegment)
-				attrs.PutStr(HttpUri, parts[1])
-				attrs.PutStr(HttpVersion, parts[2])
+		switch event.Protocol {
+		case unix.IPPROTO_TCP:
+			attrs.PutInt(TrafficType, int64(TCP))
+			tryHttp(data, attrs)
+		case unix.IPPROTO_UDP:
+			attrs.PutInt(TrafficType, int64(UDP))
+			if ntohs(event.SrcPort) == 53 || ntohs(event.DstPort) == 53 {
+				tryDNS(data, attrs)
 			}
+		}
+
+	}
+}
+
+func tryHttp(data []byte, attrs pcommon.Map) {
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	if !scanner.Scan() {
+		return
+	}
+
+	firstLine := scanner.Text()
+	parts := strings.Fields(firstLine)
+	if len(parts) < 3 {
+		return
+	}
+
+	firstSegment := parts[0]
+	if strings.HasPrefix(firstSegment, "HTTP") {
+		attrs.PutInt(TrafficType, int64(HTTP_RESP))
+		attrs.PutStr(HttpVersion, firstSegment)
+		attrs.PutStr(HttpStatus, parts[1]+" "+parts[2])
+	}
+
+	if strings.HasPrefix(firstSegment, "GET") ||
+		strings.HasPrefix(firstSegment, "POST") ||
+		strings.HasPrefix(firstSegment, "PUT") ||
+		strings.HasPrefix(firstSegment, "DELE") ||
+		strings.HasPrefix(firstSegment, "HEAD") ||
+		strings.HasPrefix(firstSegment, "OPTI") {
+		{
+			attrs.PutInt(TrafficType, int64(HTTP_REQ))
+			attrs.PutStr(HttpMethod, firstSegment)
+			attrs.PutStr(HttpUri, parts[1])
+			attrs.PutStr(HttpVersion, parts[2])
 		}
 	}
 }
 
-func buildTrafficIdentifier(event *TcpEvent) int64 {
+func tryDNS(data []byte, attrs pcommon.Map) {
+	var msg dnsmessage.Message
+	err := msg.Unpack(data)
+	if err != nil {
+		return
+	}
+
+	if !msg.Header.Response {
+		attrs.PutInt(TrafficType, int64(DNS_REQ))
+	} else {
+		attrs.PutInt(TrafficType, int64(DNS_RESP))
+	}
+}
+
+func buildTrafficIdentifier(event *L4Event) int64 {
 	minIP, minPort, maxIP, maxPort := ntoh(event.SrcIP), ntohs(event.SrcPort), ntoh(event.DstIP), ntohs(event.DstPort)
 	if minIP > maxIP {
 		minIP, maxIP = maxIP, minIP
