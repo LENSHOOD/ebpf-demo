@@ -3,6 +3,10 @@ receivers:
     ebpf_binary_path: "ebpf-receiver/ebpf/tcp.o"
     ### Here we set the nic name that to be sniffed
     nic_name: "cni0"
+    ### [OPTIONAL] RegEx Filter, Capable of Filtering the Source IP
+    ip_filter: ^*$
+    ### [OPTIONAL] Whether Set the Monitor Socket in Promisc Mode
+    promisc_mode: true
 
 processors:
   batch:

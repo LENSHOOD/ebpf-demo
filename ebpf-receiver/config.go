@@ -9,6 +9,7 @@ type EbpfRcvrConfig struct {
 	EbpfBinPath string `mapstructure:"ebpf_binary_path"`
 	NicName     string `mapstructure:"nic_name"`
 	IpFilter    string `mapstructure:"ip_filter"`
+	PromiscMode bool   `mapstructure:"promisc_mode"`
 	logger      *zap.Logger
 }
 

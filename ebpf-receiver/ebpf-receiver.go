@@ -40,6 +40,7 @@ type ebpfReceiver struct {
 	objs         *BPFObjects
 	sockFd       int
 	eventReader  *perf.Reader
+	mreq         unix.PacketMreq
 }
 
 func (rcvr *ebpfReceiver) Start(ctx context.Context, host component.Host) error {
@@ -84,6 +85,16 @@ func (rcvr *ebpfReceiver) loadEbpfProgram(binPath string, nicName string) {
 	addr := syscall.SockaddrLinklayer{Protocol: htons(syscall.ETH_P_ALL), Ifindex: iface.Index}
 	if err := syscall.Bind(sock, &addr); err != nil {
 		rcvr.logger.Sugar().Fatalf("Failed to bind socket: %v", err)
+	}
+
+	if rcvr.config.PromiscMode {
+		rcvr.mreq = unix.PacketMreq{
+			Ifindex: int32(iface.Index),
+			Type:    unix.PACKET_MR_PROMISC,
+		}
+		if err := unix.SetsockoptPacketMreq(sock, unix.SOL_PACKET, unix.PACKET_ADD_MEMBERSHIP, &rcvr.mreq); err != nil {
+			rcvr.logger.Sugar().Fatalf("Failed to set promisc: %v", err)
+		}
 	}
 
 	if err := syscall.SetsockoptInt(sock, syscall.SOL_SOCKET, unix.SO_ATTACH_BPF, rcvr.objs.Prog.FD()); err != nil {
@@ -149,6 +160,13 @@ func (rcvr *ebpfReceiver) Shutdown(ctx context.Context) error {
 	if err := unix.SetsockoptInt(rcvr.sockFd, unix.SOL_SOCKET, unix.SO_DETACH_BPF, 0); err != nil {
 		rcvr.logger.Sugar().Fatalf("Failed to detach BPF program: %v", err)
 	}
+
+	if rcvr.config.PromiscMode {
+		if err := unix.SetsockoptPacketMreq(rcvr.sockFd, unix.SOL_PACKET, unix.PACKET_DROP_MEMBERSHIP, &rcvr.mreq); err != nil {
+			rcvr.logger.Sugar().Fatalf("Failed to set promisc: %v", err)
+		}
+	}
+
 	_ = syscall.Close(rcvr.sockFd)
 	rcvr.logger.Sugar().Info("Detached eBPF program.")
 	_ = rcvr.objs.TcpEvents.Close()
