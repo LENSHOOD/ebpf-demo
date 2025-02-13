@@ -45,7 +45,9 @@ int net_filter(struct __sk_buff *skb) {
             event.dst_port = tcp.dest;
             offset += tcp.doff * 4;
 
-            bpf_skb_load_bytes(skb, offset, packet_body, sizeof(packet_body));ª
+            if (bpf_skb_load_bytes(skb, offset, packet_body, sizeof(packet_body)) < 0) {
+                return 0;
+            }
             break;
         }
 

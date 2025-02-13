@@ -145,9 +145,9 @@ func (e *postgresExporter) upsertBody(ctx context.Context, rs pcommon.Resource, 
 	var existingPayload []byte
 	query := `SELECT payload FROM net_traces WHERE id = $1`
 	if err := e.pool.QueryRow(ctx, query, id).Scan(&existingPayload); err != nil {
-		payload, err := e.buildPayload(trafficType, rs, []byte{})
+		payload, err := e.buildPayload(trafficType, rs, nil)
 		if err != nil {
-			e.logger.Sugar().Errorf("Failed to build payload: %v", err)
+			return fmt.Errorf("failed to build payload: %v", err)
 		}
 
 		protocol := "UNKNOWN"
@@ -177,7 +177,7 @@ func (e *postgresExporter) upsertBody(ctx context.Context, rs pcommon.Resource, 
 
 	payload, err := e.buildPayload(trafficType, rs, existingPayload)
 	if err != nil {
-		e.logger.Sugar().Errorf("Failed to build payload: %v", err)
+		return fmt.Errorf("failed to build payload: %v", err)
 	}
 
 	updateSQL := `UPDATE net_traces SET payload = $1 WHERE id = $2`
@@ -210,9 +210,10 @@ func (e *postgresExporter) buildPayload(tt ebpfreceiver.TT, rs pcommon.Resource,
 	switch tt {
 	case ebpfreceiver.HTTP_REQ:
 		http := HttpStruct{}
-		if len(existingPayload) != 0 {
+		if existingPayload != nil {
 			if err := json.Unmarshal(existingPayload, &http); err != nil {
-				return []byte{}, fmt.Errorf("unmarshal error: %v", err)
+				e.logger.Sugar().Errorf("Error: %v, payload: %v", err, existingPayload)
+				return nil, fmt.Errorf("unmarshal error: %v", err)
 			}
 		}
 		http.Start = strconv.FormatInt(getIntFromRs(rs, ebpfreceiver.Timestamp), 10)
@@ -224,9 +225,10 @@ func (e *postgresExporter) buildPayload(tt ebpfreceiver.TT, rs pcommon.Resource,
 
 	case ebpfreceiver.HTTP_RESP:
 		http := HttpStruct{}
-		if len(existingPayload) != 0 {
+		if existingPayload != nil {
 			if err := json.Unmarshal(existingPayload, &http); err != nil {
-				return []byte{}, fmt.Errorf("unmarshal error: %v", err)
+				e.logger.Sugar().Errorf("Error: %v, payload: %v", err, existingPayload)
+				return nil, fmt.Errorf("unmarshal error: %v", err)
 			}
 		}
 		http.End = strconv.FormatInt(getIntFromRs(rs, ebpfreceiver.Timestamp), 10)
@@ -236,9 +238,9 @@ func (e *postgresExporter) buildPayload(tt ebpfreceiver.TT, rs pcommon.Resource,
 
 	case ebpfreceiver.DNS_REQ:
 		dns := DnsStruct{}
-		if len(existingPayload) != 0 {
+		if existingPayload != nil {
 			if err := json.Unmarshal(existingPayload, &dns); err != nil {
-				return []byte{}, fmt.Errorf("unmarshal error: %v", err)
+				return nil, fmt.Errorf("unmarshal error: %v", err)
 			}
 		}
 		dns.Start = strconv.FormatInt(getIntFromRs(rs, ebpfreceiver.Timestamp), 10)
@@ -246,16 +248,16 @@ func (e *postgresExporter) buildPayload(tt ebpfreceiver.TT, rs pcommon.Resource,
 		return json.Marshal(dns)
 	case ebpfreceiver.DNS_RESP:
 		dns := DnsStruct{}
-		if len(existingPayload) != 0 {
+		if existingPayload != nil {
 			if err := json.Unmarshal(existingPayload, &dns); err != nil {
-				return []byte{}, fmt.Errorf("unmarshal error: %v", err)
+				return nil, fmt.Errorf("unmarshal error: %v", err)
 			}
 		}
 		dns.End = strconv.FormatInt(getIntFromRs(rs, ebpfreceiver.Timestamp), 10)
 		dns.RespContent = getStrFromRs(rs, ebpfreceiver.BodyContent)
 		return json.Marshal(dns)
 	default:
-		return json.Marshal("")
+		return nil, nil
 	}
 }
 
