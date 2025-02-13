@@ -45,9 +45,7 @@ int net_filter(struct __sk_buff *skb) {
             event.dst_port = tcp.dest;
             offset += tcp.doff * 4;
 
-            if (bpf_skb_load_bytes(skb, offset, packet_body, sizeof(packet_body)) < 0) {
-                return 0;
-            }
+            bpf_skb_load_bytes(skb, offset, packet_body, sizeof(packet_body));ª
             break;
         }
 
@@ -59,11 +57,9 @@ int net_filter(struct __sk_buff *skb) {
 
             event.src_port = udp.source;
             event.dst_port = udp.dest;
-            offset += udp.len;
+            offset += sizeof(udp);
 
-            if (bpf_skb_load_bytes(skb, offset, packet_body, sizeof(packet_body)) < 0) {
-                return 0;
-            }
+            bpf_skb_load_bytes(skb, offset, packet_body, sizeof(packet_body));
             break;
         }
 

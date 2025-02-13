@@ -5,6 +5,7 @@ import (
 	"bytes"
 	crand "crypto/rand"
 	"encoding/binary"
+	"fmt"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/ptrace"
@@ -149,16 +150,15 @@ func tryHttp(data []byte, attrs pcommon.Map) {
 
 func tryDNS(data []byte, attrs pcommon.Map) {
 	var msg dnsmessage.Message
-	err := msg.Unpack(data)
-	if err != nil {
-		return
-	}
+	_ = msg.Unpack(data)
 
+	fmt.Printf("DNS: %s\n", msg.GoString())
 	if !msg.Header.Response {
 		attrs.PutInt(TrafficType, int64(DNS_REQ))
 	} else {
 		attrs.PutInt(TrafficType, int64(DNS_RESP))
 	}
+	attrs.PutStr(BodyContent, msg.GoString())
 }
 
 func buildTrafficIdentifier(event *L4Event) int64 {

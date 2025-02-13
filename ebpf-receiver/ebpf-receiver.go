@@ -136,7 +136,7 @@ func (rcvr *ebpfReceiver) listen(ctx context.Context) func() {
 						continue
 					}
 
-					rcvr.logger.Sugar().Debugf("TCP Packaet: from %s:%d, to %s:%d, protocal: %d\n", u32ToIPv4(ntoh(event.SrcIP)), ntohs(event.SrcPort), u32ToIPv4(ntoh(event.DstIP)), ntohs(event.DstPort), event.Protocol)
+					rcvr.logger.Sugar().Debugf("L4 Packaet: from %s:%d, to %s:%d, protocal: %d\n", u32ToIPv4(ntoh(event.SrcIP)), ntohs(event.SrcPort), u32ToIPv4(ntoh(event.DstIP)), ntohs(event.DstPort), event.Protocol)
 					_ = rcvr.nextConsumer.ConsumeTraces(ctx, generateEbpfTraces(&event))
 				}
 			}
@@ -145,6 +145,10 @@ func (rcvr *ebpfReceiver) listen(ctx context.Context) func() {
 }
 
 func allows(filter string, event L4Event) bool {
+	if filter == "" {
+		return true
+	}
+
 	ip := u32ToIPv4(ntoh(event.SrcIP))
 	re := regexp.MustCompile(filter)
 	return re.MatchString(ip)
