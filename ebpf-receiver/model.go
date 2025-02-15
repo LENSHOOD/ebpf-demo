@@ -92,7 +92,11 @@ func fillResourceWithAttributes(resource *pcommon.Resource, event *L4Event, dire
 	case NodeDest:
 		attrs.PutStr(MetadataIp, u32ToIPv4(ntoh(event.DstIP)))
 	case Body:
-		data := event.Data[:]
+		endOfData := int(event.DataLength)
+		if endOfData > len(event.Data) {
+			endOfData = len(event.Data)
+		}
+		data := event.Data[:endOfData]
 		attrs.PutStr(BodyContent, string(data))
 		attrs.PutInt(MetadataTrafficIdentifier, buildTrafficIdentifier(event))
 		attrs.PutStr(MetadataSrc, u32ToIPv4(ntoh(event.SrcIP)))

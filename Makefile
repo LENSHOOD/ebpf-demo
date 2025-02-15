@@ -8,8 +8,8 @@ GO_DIR = otelcol-ebpf-demo
 
 CLANG = clang
 BPF_DIR = ebpf-receiver/ebpf
-BPF_SRC = $(BPF_DIR)/tcp.bpf.c
-BPF_OBJ = $(BPF_DIR)/tcp.o
+BPF_SRC = $(BPF_DIR)/l4_traffic.bpf.c
+BPF_OBJ = $(BPF_DIR)/l4_traffic.o
 
 build-in-container: clean
 	$(DOCKER) build -t ebpf-demo-builder:latest -f Dockerfile.build .

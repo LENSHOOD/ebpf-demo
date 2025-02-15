@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"github.com/cilium/ebpf"
-	"github.com/cilium/ebpf/perf"
+	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
@@ -24,12 +24,13 @@ type L4Event struct {
 	DstIP       uint32
 	SrcPort     uint16
 	DstPort     uint16
-	Data        [64]byte
+	DataLength  uint16
+	Data        [80]byte
 }
 
 type BPFObjects struct {
-	L4Events *ebpf.Map     `ebpf:"l4_events"`
-	Prog     *ebpf.Program `ebpf:"net_filter"`
+	Rb   *ebpf.Map     `ebpf:"l4_events_rb"`
+	Prog *ebpf.Program `ebpf:"net_filter"`
 }
 
 type ebpfReceiver struct {
@@ -40,7 +41,7 @@ type ebpfReceiver struct {
 	config       *EbpfRcvrConfig
 	objs         *BPFObjects
 	sockFd       int
-	eventReader  *perf.Reader
+	eventReader  *ringbuf.Reader
 	mreq         unix.PacketMreq
 }
 
@@ -102,7 +103,7 @@ func (rcvr *ebpfReceiver) loadEbpfProgram(binPath string, nicName string) {
 		rcvr.logger.Sugar().Fatalf("Failed to attach BPF program to socket: %v", err)
 	}
 
-	reader, err := perf.NewReader(rcvr.objs.L4Events, 4096)
+	reader, err := ringbuf.NewReader(rcvr.objs.Rb)
 	if err != nil {
 		rcvr.logger.Sugar().Fatalf("Failed to create perf event reader: %v", err)
 	}
@@ -136,7 +137,7 @@ func (rcvr *ebpfReceiver) listen(ctx context.Context) func() {
 						continue
 					}
 
-					rcvr.logger.Sugar().Debugf("L4 Packaet: from %s:%d, to %s:%d, protocal: %d\n", u32ToIPv4(ntoh(event.SrcIP)), ntohs(event.SrcPort), u32ToIPv4(ntoh(event.DstIP)), ntohs(event.DstPort), event.Protocol)
+					rcvr.logger.Sugar().Debugf("L4 Packaet: from %s:%d, to %s:%d, protocal: %d, len: %d\n", u32ToIPv4(ntoh(event.SrcIP)), ntohs(event.SrcPort), u32ToIPv4(ntoh(event.DstIP)), ntohs(event.DstPort), event.Protocol, event.DataLength)
 					_ = rcvr.nextConsumer.ConsumeTraces(ctx, generateEbpfTraces(&event))
 				}
 			}
@@ -173,7 +174,7 @@ func (rcvr *ebpfReceiver) Shutdown(ctx context.Context) error {
 
 	_ = syscall.Close(rcvr.sockFd)
 	rcvr.logger.Sugar().Info("Detached eBPF program.")
-	_ = rcvr.objs.L4Events.Close()
+	_ = rcvr.objs.Rb.Close()
 	_ = rcvr.objs.Prog.Close()
 	rcvr.logger.Sugar().Info("Exited")
 
