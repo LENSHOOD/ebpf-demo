@@ -2,43 +2,204 @@ receivers:
   ebpf_receiver:
     ebpf_binary_path: "ebpf-receiver/ebpf/tcp.o"
     ### Here we set the nic name that to be sniffed
-    nic_name: "cni0"
+    nic_name: "cilium_net"
     ### [OPTIONAL] RegEx Filter, Capable of Filtering the Source IP
 #    ip_filter: ^*$
     ### [OPTIONAL] Whether Set the Monitor Socket in Promisc Mode
     promisc_mode: true
-
+  filelog:
+    exclude:
+    - /var/log/pods/open-telemetry_otel-agent*_*/opentelemetry-collector/*.log
+    - /var/log/pods/kube-system_otel-ebpf-demo-collector-daemon*_*/ebpf-demo-collector/*.log
+    include:
+    - /var/log/pods/*/*/*.log
+    include_file_name: false
+    include_file_path: true
+    operators:
+    - id: container-parser
+      max_log_size: 102400
+      type: container
+    retry_on_failure:
+      enabled: true
+    start_at: end
+  hostmetrics:
+    collection_interval: 30s
+    root_path: /hostfs
+    scrapers:
+      cpu: null
+      disk: null
+      filesystem: null
+      load: null
+      memory: null
+      network: null
+  kubeletstats:
+    auth_type: serviceAccount
+    collection_interval: 30s
+    endpoint: ${env:K8S_NODE_NAME}:10250
+    insecure_skip_verify: true
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+  prometheus:
+    config:
+      scrape_configs:
+      - job_name: opentelemetry-collector
+        scrape_interval: 10s
+        static_configs:
+        - targets:
+          - ${env:MY_POD_IP}:18888
 processors:
   batch:
+    send_batch_size: 1000
+    timeout: 10s
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 50
+    spike_limit_percentage: 30
+  resource:
+    attributes:
+    - action: insert
+      from_attribute: k8s.pod.ip
+      key: app.host.ip
+  resourcedetection/env:
+    detectors:
+    - env
+    - system
+    override: false
+    timeout: 2s
   k8sattributes:
     auth_type: "serviceAccount"
     passthrough: false
-    pod_association:
-      - sources:
-          - from: resource_attribute
-            name: k8s.pod.ip
     extract:
+      labels:
+      - from: pod
+        key: app
+        tag_name: k8s.pod.labels.app
       metadata:
-        - k8s.pod.name
-        - k8s.deployment.name
-        - k8s.node.name
-        - k8s.namespace.name
+      - k8s.namespace.name
+      - k8s.deployment.name
+      - k8s.statefulset.name
+      - k8s.daemonset.name
+      - k8s.cronjob.name
+      - k8s.job.name
+      - k8s.node.name
+      - k8s.pod.name
+      - k8s.pod.uid
+      - k8s.pod.start_time
+    filter:
+      node_from_env_var: K8S_NODE_NAME
+    pod_association:
+    - sources:
+      - from: resource_attribute
+        name: k8s.pod.ip
+    - sources:
+      - from: resource_attribute
+        name: k8s.pod.uid
+    - sources:
+      - from: connection
 
 exporters:
   debug:
     verbosity: detailed
   pg_exporter:
     ### Here we set Postgres' connection link
-    dsn: "postgres://postgres:password@postgres-service.monitoring:5432/testdb"
+    dsn: "postgres://postgres:pgpassword@mypostgres.default:5432/tsdb"
     ### Here we set the path of DB init sql script
     db_init_sql_path: "db_init/init.sql"
+  doris:
+    create_history_days: 0
+    create_schema: true
+    database: otel
+    endpoint: http://doriscluster-sample-be-service.doris:8040
+    history_days: 0
+    mysql_endpoint: doriscluster-sample-fe-service.doris:9030
+    password: ""
+    replication_num: 1
+    timezone: Asia/Shanghai
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_elapsed_time: 300s
+      max_interval: 30s
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 1000
+    table:
+      logs: otel_logs
+      metrics: otel_metrics
+      traces: otel_traces
+    timeout: 5s
+    username: root
+  kafka:
+    auth:
+      sasl:
+        mechanism: PLAIN
+        password: mrzmiJCotG
+        username: user1
+    brokers:
+    - kafka.default:9092
+    encoding: otlp_json
+    partition_traces_by_id: true
+    producer:
+      max_message_bytes: 20485880
+    protocol_version: 2.0.0
+  prometheusremotewrite:
+    endpoint: http://192.168.50.70:8428/api/v1/write
+    resource_to_telemetry_conversion:
+      enabled: true
+    tls:
+      insecure_skip_verify: true
+
+extensions:
+  health_check:
+    endpoint: ${env:MY_POD_IP}:13133
 
 service:
+  extensions:
+  - health_check
   pipelines:
-    traces:
+    logs:
+      exporters:
+      - kafka
+      - doris
+      processors:
+      - k8sattributes
+      - batch
+      - memory_limiter
+      receivers:
+      - filelog
+    metrics:
+      exporters:
+      - kafka
+      - prometheusremotewrite
+      processors:
+      - k8sattributes
+      - batch
+      - memory_limiter
+      - resourcedetection/env
+      receivers:
+      - hostmetrics
+      - kubeletstats
+    traces/ebpf:
       receivers: [ebpf_receiver]
       processors: [batch, k8sattributes]
       exporters: [debug, pg_exporter]
+    traces:
+      exporters:
+      - kafka
+      - doris
+      processors:
+      - k8sattributes
+      - batch
+      - memory_limiter
+      receivers:
+      - otlp
   telemetry:
     logs:
       level: debug
+    metrics:
+      address: ${env:MY_POD_IP}:18888

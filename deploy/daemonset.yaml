@@ -16,17 +16,38 @@ spec:
       dnsPolicy: ClusterFirstWithHostNet
       containers:
       - name: ebpf-demo-collector
-        image: localhost:5000/otel-ebpf-demo:latest
+        image: owenchen1992/otel-ebpf-demo:latest
         imagePullPolicy: Always
         securityContext:
           privileged: true
+        env:
+        - name: MY_POD_IP
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: status.podIP
+        - name: K8S_NODE_NAME
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: spec.nodeName
         volumeMounts:
+          - name: tzdata
+            mountPath: /usr/share/zoneinfo
+            readOnly: true
           - name: collector-config
             mountPath: /app/collector-config/
           - name: ebpf-bin
             mountPath: /app/ebpf-receiver/ebpf/
           - name: db-init
             mountPath: /app/db_init/
+          - mountPath: /var/log/pods
+            name: varlogpods
+            readOnly: true
+          - mountPath: /hostfs
+            mountPropagation: HostToContainer
+            name: hostfs
+            readOnly: true
         resources:
           limits:
             memory: "256Mi"
@@ -35,9 +56,21 @@ spec:
             memory: "128Mi"
             cpu: "250m"
         ports:
-        - containerPort: 8000
+        - containerPort: 18888
           name: metrics
+        - containerPort: 4317
+          hostPort: 4317
+          name: otlp
+          protocol: TCP
+        - containerPort: 4318
+          hostPort: 4318
+          name: otlp-http
+          protocol: TCP
       volumes:
+        - name: tzdata
+          hostPath:
+            path: /usr/share/zoneinfo
+            type: Directory
         - name: collector-config
           configMap:
             name: collector-config
@@ -47,6 +80,14 @@ spec:
         - name: db-init
           configMap:
             name: db-init
+        - name: hostfs
+          hostPath:
+            path: /
+            type: ""
+        - name: varlogpods
+          hostPath:
+            path: /var/log/pods
+            type: ""
 ### Exclude master node
 #      tolerations:
 #      - key: "node-role.kubernetes.io/master"

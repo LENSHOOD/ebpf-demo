@@ -5,6 +5,7 @@ namespace: kube-system
 resources:
   - deploy/sa_role.yaml
   - deploy/daemonset.yaml
+  - deploy/svc.yaml
 
 configMapGenerator:
   - name: collector-config

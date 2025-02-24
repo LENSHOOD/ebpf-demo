@@ -10,7 +10,7 @@ metadata:
   name: otel-ebpf-demo-collector-daemon
 rules:
 - apiGroups: [""]
-  resources: ["pods", "namespaces", "nodes"]
+  resources: ["pods", "namespaces", "nodes", "nodes/stats"]
   verbs: ["get", "watch", "list"]
 - apiGroups: ["apps"]
   resources: ["replicasets"]
