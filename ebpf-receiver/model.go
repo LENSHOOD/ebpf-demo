@@ -6,13 +6,15 @@ import (
 	crand "crypto/rand"
 	"encoding/binary"
 	"fmt"
+	"math/rand"
+	"strings"
+	"time"
+
 	"github.com/google/uuid"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	"golang.org/x/net/dns/dnsmessage"
 	"golang.org/x/sys/unix"
-	"math/rand"
-	"strings"
 )
 
 type Kind int
@@ -28,6 +30,7 @@ const SrcSpanName = "tcp_event_src"
 const DestSpanName = "tcp_event_dest"
 const BodySpanName = "tcp_event_body"
 const TrafficType = "traffic.type"
+const ServiceName = "service.name"
 
 type TT int
 
@@ -86,6 +89,7 @@ func fillResourceWithAttributes(resource *pcommon.Resource, event *L4Event, dire
 	attrs := resource.Attributes()
 	attrs.PutInt(Timestamp, int64(event.TimestampNs))
 	attrs.PutInt(DirectionKey, int64(direction))
+	attrs.PutStr(ServiceName, "ebpf-receiver")
 	switch direction {
 	case NodeSrc:
 		attrs.PutStr(MetadataIp, u32ToIPv4(ntoh(event.SrcIP)))
@@ -180,7 +184,8 @@ func buildTrafficIdentifier(event *L4Event) int64 {
 
 func appendScopeSpans(resourceSpans *ptrace.ResourceSpans) ptrace.ScopeSpans {
 	scopeSpans := resourceSpans.ScopeSpans().AppendEmpty()
-
+	scopeSpans.Scope().SetName("ebpf-receiver")
+	scopeSpans.Scope().SetVersion("1.0.0")
 	return scopeSpans
 }
 
@@ -203,8 +208,14 @@ func NewSpanID() pcommon.SpanID {
 func appendTraceSpans(scopeSpans *ptrace.ScopeSpans, traceId pcommon.TraceID, spanName string) {
 	span := scopeSpans.Spans().AppendEmpty()
 	span.SetTraceID(traceId)
+	span.SetParentSpanID(pcommon.NewSpanIDEmpty())
 	span.SetSpanID(NewSpanID())
 	span.SetName(spanName)
 	span.SetKind(ptrace.SpanKindClient)
 	span.Status().SetCode(ptrace.StatusCodeOk)
+	span.SetStartTimestamp(pcommon.Timestamp(time.Now().UnixNano()))
+	span.SetEndTimestamp(pcommon.Timestamp(time.Now().UnixNano() + 1_000_000))
+	span.Attributes().PutStr(ServiceName, "ebpf-receiver")
+	span.Events().AppendEmpty()
+	span.Links().AppendEmpty()
 }

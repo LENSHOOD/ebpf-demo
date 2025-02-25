@@ -1,5 +1,5 @@
 DOCKER = sudo docker
-DOCKER_REGISTRY = localhost:5000
+DOCKER_REGISTRY = owenchen1992
 KBCTL = sudo kubectl
 
 GO_ENV = env GOOS=linux

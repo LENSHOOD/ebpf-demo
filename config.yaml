@@ -1,6 +1,6 @@
 receivers:
   ebpf_receiver:
-    ebpf_binary_path: "ebpf-receiver/ebpf/tcp.o"
+    ebpf_binary_path: "ebpf-receiver/ebpf/l4_traffic.o"
     ### Here we set the nic name that to be sniffed
     nic_name: "cilium_net"
     ### [OPTIONAL] RegEx Filter, Capable of Filtering the Source IP
@@ -187,7 +187,7 @@ service:
     traces/ebpf:
       receivers: [ebpf_receiver]
       processors: [batch, k8sattributes]
-      exporters: [debug, pg_exporter]
+      exporters: [debug, kafka, doris]
     traces:
       exporters:
       - kafka
