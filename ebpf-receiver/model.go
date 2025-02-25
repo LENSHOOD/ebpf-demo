@@ -65,19 +65,19 @@ func generateEbpfTraces(l4Event *L4Event) ptrace.Traces {
 	srcRs := srcRsSpan.Resource()
 	fillResourceWithAttributes(&srcRs, l4Event, NodeSrc)
 	srcScope := appendScopeSpans(&srcRsSpan)
-	appendTraceSpans(&srcScope, traceId, SrcSpanName)
+	appendTraceSpans(&srcScope, traceId, SrcSpanName, l4Event)
 
 	destRsSpan := traces.ResourceSpans().AppendEmpty()
 	destRs := destRsSpan.Resource()
 	fillResourceWithAttributes(&destRs, l4Event, NodeDest)
 	destScope := appendScopeSpans(&destRsSpan)
-	appendTraceSpans(&destScope, traceId, DestSpanName)
+	appendTraceSpans(&destScope, traceId, DestSpanName, l4Event)
 
 	bodyRsSpan := traces.ResourceSpans().AppendEmpty()
 	bodyRs := bodyRsSpan.Resource()
 	fillResourceWithAttributes(&bodyRs, l4Event, Body)
 	bodyScope := appendScopeSpans(&bodyRsSpan)
-	appendTraceSpans(&bodyScope, traceId, BodySpanName)
+	appendTraceSpans(&bodyScope, traceId, BodySpanName, l4Event)
 
 	return traces
 }
@@ -200,11 +200,14 @@ func NewSpanID() pcommon.SpanID {
 	return spanID
 }
 
-func appendTraceSpans(scopeSpans *ptrace.ScopeSpans, traceId pcommon.TraceID, spanName string) {
+func appendTraceSpans(scopeSpans *ptrace.ScopeSpans, traceId pcommon.TraceID, spanName string, l4event *L4Event) {
 	span := scopeSpans.Spans().AppendEmpty()
 	span.SetTraceID(traceId)
 	span.SetSpanID(NewSpanID())
 	span.SetName(spanName)
 	span.SetKind(ptrace.SpanKindClient)
 	span.Status().SetCode(ptrace.StatusCodeOk)
+	span.SetStartTimestamp(pcommon.Timestamp(l4event.TimestampNs))
+	span.SetEndTimestamp(pcommon.Timestamp(l4event.TimestampNs + 1_000_000))
+	span.Attributes().PutInt(Timestamp, int64(l4event.TimestampNs))
 }

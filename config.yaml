@@ -187,7 +187,7 @@ service:
     traces/ebpf:
       receivers: [ebpf_receiver]
       processors: [batch, k8sattributes]
-      exporters: [debug, pg_exporter]
+      exporters: [debug, kafka ,pg_exporter]
     traces:
       exporters:
       - kafka
