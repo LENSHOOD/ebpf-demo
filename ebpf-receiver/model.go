@@ -6,13 +6,15 @@ import (
 	crand "crypto/rand"
 	"encoding/binary"
 	"fmt"
+	"math/rand"
+	"strings"
+	"time"
+
 	"github.com/google/uuid"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	"golang.org/x/net/dns/dnsmessage"
 	"golang.org/x/sys/unix"
-	"math/rand"
-	"strings"
 )
 
 type Kind int
@@ -66,19 +68,19 @@ func generateEbpfTraces(l4Event *L4Event) ptrace.Traces {
 	srcRs := srcRsSpan.Resource()
 	fillResourceWithAttributes(&srcRs, l4Event, NodeSrc)
 	srcScope := appendScopeSpans(&srcRsSpan)
-	appendTraceSpans(&srcScope, traceId, SrcSpanName, l4Event)
+	appendTraceSpans(&srcScope, traceId, SrcSpanName)
 
 	destRsSpan := traces.ResourceSpans().AppendEmpty()
 	destRs := destRsSpan.Resource()
 	fillResourceWithAttributes(&destRs, l4Event, NodeDest)
 	destScope := appendScopeSpans(&destRsSpan)
-	appendTraceSpans(&destScope, traceId, DestSpanName, l4Event)
+	appendTraceSpans(&destScope, traceId, DestSpanName)
 
 	bodyRsSpan := traces.ResourceSpans().AppendEmpty()
 	bodyRs := bodyRsSpan.Resource()
 	fillResourceWithAttributes(&bodyRs, l4Event, Body)
 	bodyScope := appendScopeSpans(&bodyRsSpan)
-	appendTraceSpans(&bodyScope, traceId, BodySpanName, l4Event)
+	appendTraceSpans(&bodyScope, traceId, BodySpanName)
 
 	return traces
 }
@@ -203,14 +205,15 @@ func NewSpanID() pcommon.SpanID {
 	return spanID
 }
 
-func appendTraceSpans(scopeSpans *ptrace.ScopeSpans, traceId pcommon.TraceID, spanName string, l4event *L4Event) {
+func appendTraceSpans(scopeSpans *ptrace.ScopeSpans, traceId pcommon.TraceID, spanName string) {
 	span := scopeSpans.Spans().AppendEmpty()
 	span.SetTraceID(traceId)
+	span.SetParentSpanID(pcommon.NewSpanIDEmpty())
 	span.SetSpanID(NewSpanID())
 	span.SetName(spanName)
 	span.SetKind(ptrace.SpanKindClient)
 	span.Status().SetCode(ptrace.StatusCodeOk)
-	span.SetStartTimestamp(pcommon.Timestamp(l4event.TimestampNs))
-	span.SetEndTimestamp(pcommon.Timestamp(l4event.TimestampNs + 1_000_000))
+	span.SetStartTimestamp(pcommon.Timestamp(time.Now().UnixNano()))
+	span.SetEndTimestamp(pcommon.Timestamp(time.Now().UnixNano() + 1_000_000))
 	span.Attributes().PutStr(ServiceName, "ebpf-receiver")
 }
