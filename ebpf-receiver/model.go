@@ -28,6 +28,7 @@ const SrcSpanName = "tcp_event_src"
 const DestSpanName = "tcp_event_dest"
 const BodySpanName = "tcp_event_body"
 const TrafficType = "traffic.type"
+const ServiceName = "service.name"
 
 type TT int
 
@@ -86,6 +87,7 @@ func fillResourceWithAttributes(resource *pcommon.Resource, event *L4Event, dire
 	attrs := resource.Attributes()
 	attrs.PutInt(Timestamp, int64(event.TimestampNs))
 	attrs.PutInt(DirectionKey, int64(direction))
+	attrs.PutStr(ServiceName, "ebpf-receiver")
 	switch direction {
 	case NodeSrc:
 		attrs.PutStr(MetadataIp, u32ToIPv4(ntoh(event.SrcIP)))
