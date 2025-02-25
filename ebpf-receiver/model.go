@@ -182,7 +182,8 @@ func buildTrafficIdentifier(event *L4Event) int64 {
 
 func appendScopeSpans(resourceSpans *ptrace.ResourceSpans) ptrace.ScopeSpans {
 	scopeSpans := resourceSpans.ScopeSpans().AppendEmpty()
-
+	scopeSpans.Scope().SetName("ebpf-receiver")
+	scopeSpans.Scope().SetVersion("1.0.0")
 	return scopeSpans
 }
 
