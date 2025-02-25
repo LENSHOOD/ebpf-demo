@@ -212,5 +212,5 @@ func appendTraceSpans(scopeSpans *ptrace.ScopeSpans, traceId pcommon.TraceID, sp
 	span.Status().SetCode(ptrace.StatusCodeOk)
 	span.SetStartTimestamp(pcommon.Timestamp(l4event.TimestampNs))
 	span.SetEndTimestamp(pcommon.Timestamp(l4event.TimestampNs + 1_000_000))
-	// span.Attributes().PutInt(Timestamp, int64(l4event.TimestampNs))
+	span.Attributes().PutStr(ServiceName, "ebpf-receiver")
 }
