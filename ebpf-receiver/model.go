@@ -216,4 +216,6 @@ func appendTraceSpans(scopeSpans *ptrace.ScopeSpans, traceId pcommon.TraceID, sp
 	span.SetStartTimestamp(pcommon.Timestamp(time.Now().UnixNano()))
 	span.SetEndTimestamp(pcommon.Timestamp(time.Now().UnixNano() + 1_000_000))
 	span.Attributes().PutStr(ServiceName, "ebpf-receiver")
+	span.Events().AppendEmpty()
+	span.Links().AppendEmpty()
 }
