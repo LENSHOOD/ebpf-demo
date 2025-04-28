@@ -16,7 +16,7 @@ spec:
       dnsPolicy: ClusterFirstWithHostNet
       containers:
       - name: ebpf-demo-collector
-        image: owenchen1992/otel-ebpf-demo:latest
+        image: fake-image
         imagePullPolicy: Always
         securityContext:
           privileged: true

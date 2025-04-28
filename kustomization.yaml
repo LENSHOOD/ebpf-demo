@@ -7,6 +7,11 @@ resources:
   - deploy/daemonset.yaml
   - deploy/svc.yaml
 
+images:
+  - name: ebpf-demo-collector
+    newName: ${IMAGE_NAME}
+    newTag: ${IMAGE_TAG}
+
 configMapGenerator:
   - name: collector-config
     files:

@@ -1,5 +1,7 @@
+include .env
+export
+
 DOCKER = sudo docker
-DOCKER_REGISTRY = owenchen1992
 KBCTL = sudo kubectl
 
 GO_ENV = env GOOS=linux
@@ -24,20 +26,23 @@ $(BPF_OBJ): $(BPF_SRC)
 	@echo "Building eBPF program..."
 	$(CLANG) -g -O2 -target bpf -D__TARGET_ARCH_x86 -c $(BPF_SRC) -o $(BPF_OBJ)
 
-.PHONY: build run-local build-image deploy destroy setup-example destroy-example clean
+.PHONY: build run-local build-image deploy destroy setup-example destroy-example clean print-kustomization
 run-local:
 	$(GO) run ./$(GO_DIR) --config config.yaml
 
 build-image:
-	$(DOCKER) build -t otel-ebpf-demo:latest .
-	$(DOCKER) tag otel-ebpf-demo:latest $(DOCKER_REGISTRY)/otel-ebpf-demo:latest
-	$(DOCKER) push $(DOCKER_REGISTRY)/otel-ebpf-demo:latest
+	$(DOCKER) build -t $(IMAGE_NAME):$(IMAGE_TAG) .
+	$(DOCKER) tag $(IMAGE_NAME):$(IMAGE_TAG) $(DOCKER_REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)
+	$(DOCKER) push $(DOCKER_REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)
+
+print-kustomization:
+	envsubst < kustomization.yaml | cat -
 
 deploy:
-	$(KBCTL) apply -k .
+	envsubst < kustomization.yaml | $(KBCTL) apply -k -
 
 destroy:
-	$(KBCTL) delete -k .
+	envsubst < kustomization.yaml | $(KBCTL) delete -k -
 
 setup-example:
 	$(KBCTL) apply -k ./example/
