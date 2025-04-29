@@ -129,7 +129,6 @@ int net_filter(struct __sk_buff *skb) {
     event->data_len = l4_payload_len;
     bpf_skb_load_bytes(skb, payload_offset, event->data, MAX_PACK_SIZE);
 
-    bpf_printk("Event: %d:%d-%d:%d, len: %d", event->src_ip, event->src_port, event->dst_ip, event->dst_port, event->data_len);
     bpf_ringbuf_submit(event, 0);
 //    __builtin_memcpy(event.data, packet_body, sizeof(packet_body));
 //    bpf_perf_event_output(skb, &l4_events, BPF_F_CURRENT_CPU, &event, sizeof(event));
