@@ -1,7 +1,7 @@
 include .env
 export
 
-DOCKER = sudo docker
+DOCKER = docker
 KBCTL = sudo kubectl
 
 GO_ENV = env GOOS=linux
@@ -13,7 +13,7 @@ BPF_DIR = ebpf-receiver/ebpf
 BPF_SRC = $(BPF_DIR)/l4_traffic.bpf.c
 BPF_OBJ = $(BPF_DIR)/l4_traffic.o
 
-build-in-container: clean
+build-in-container: 
 	$(DOCKER) build -t ebpf-demo-builder:latest -f Dockerfile.build .
 	$(DOCKER) run --rm -v ./:/build -w /build ebpf-demo-builder:latest make build
 
