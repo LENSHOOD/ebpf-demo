@@ -124,35 +124,53 @@ func fillResourceWithAttributes(resource *pcommon.Resource, event *L4Event, dire
 
 func tryHttp(data []byte, attrs pcommon.Map) {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
-	if !scanner.Scan() {
-		return
-	}
 
-	firstLine := scanner.Text()
-	parts := strings.Fields(firstLine)
-	if len(parts) < 3 {
-		return
-	}
-
-	firstSegment := parts[0]
-	if strings.HasPrefix(firstSegment, "HTTP") {
-		attrs.PutInt(TrafficType, int64(HTTP_RESP))
-		attrs.PutStr(HttpVersion, firstSegment)
-		attrs.PutStr(HttpStatus, parts[1]+" "+parts[2])
-	}
-
-	if strings.HasPrefix(firstSegment, "GET") ||
-		strings.HasPrefix(firstSegment, "POST") ||
-		strings.HasPrefix(firstSegment, "PUT") ||
-		strings.HasPrefix(firstSegment, "DELE") ||
-		strings.HasPrefix(firstSegment, "HEAD") ||
-		strings.HasPrefix(firstSegment, "OPTI") {
-		{
-			attrs.PutInt(TrafficType, int64(HTTP_REQ))
-			attrs.PutStr(HttpMethod, firstSegment)
-			attrs.PutStr(HttpUri, parts[1])
-			attrs.PutStr(HttpVersion, parts[2])
+	lineNum := 0
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			break
 		}
+		if lineNum == 0 {
+			parts := strings.Fields(line)
+			if len(parts) < 3 {
+				return
+			}
+		
+			firstSegment := parts[0]
+			if strings.HasPrefix(firstSegment, "HTTP") {
+				attrs.PutInt(TrafficType, int64(HTTP_RESP))
+				attrs.PutStr(HttpVersion, firstSegment)
+				attrs.PutStr(HttpStatus, parts[1]+" "+parts[2])
+			}
+		
+			if strings.HasPrefix(firstSegment, "GET") ||
+				strings.HasPrefix(firstSegment, "POST") ||
+				strings.HasPrefix(firstSegment, "PUT") ||
+				strings.HasPrefix(firstSegment, "DELE") ||
+				strings.HasPrefix(firstSegment, "HEAD") ||
+				strings.HasPrefix(firstSegment, "OPTI") {
+				{
+					attrs.PutInt(TrafficType, int64(HTTP_REQ))
+					attrs.PutStr(HttpMethod, firstSegment)
+					attrs.PutStr(HttpUri, parts[1])
+					attrs.PutStr(HttpVersion, parts[2])
+				}
+			}
+		} else {
+			colonIndex := strings.Index(line, ":")
+			if colonIndex != -1 {
+				key := strings.TrimSpace(line[:colonIndex])
+				val := strings.TrimSpace(line[colonIndex+1:])
+				if key == "traceparent" {
+					attrs.PutStr("traceparent", val)
+				}
+				if key == "tracestate" {
+					attrs.PutStr("tracestate", val)
+				}
+			}
+		}
+		lineNum++
 	}
 }
 

@@ -4,6 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"io"
+	"net"
+	"regexp"
+	"syscall"
+
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
@@ -11,10 +16,6 @@ import (
 	"go.opentelemetry.io/collector/consumer"
 	"go.uber.org/zap"
 	"golang.org/x/sys/unix"
-	"io"
-	"net"
-	"regexp"
-	"syscall"
 )
 
 type L4Event struct {
