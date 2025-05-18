@@ -8,8 +8,8 @@ resources:
   - deploy/svc.yaml
 
 images:
-  - name: ebpf-demo-collector
-    newName: ${IMAGE_NAME}
+  - name: ebpf-demo-collector-image
+    newName: ${DOCKER_REGISTRY}/${IMAGE_NAME}
     newTag: ${IMAGE_TAG}
 
 configMapGenerator:

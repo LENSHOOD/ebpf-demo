@@ -39,13 +39,17 @@ build-image:
 	$(DOCKER) push $(DOCKER_REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)
 
 print-kustomization:
-	envsubst < kustomization.yaml | cat -
+	envsubst < kustomization.tpl | cat -
 
 deploy:
-	envsubst < kustomization.yaml | $(KBCTL) apply -k -
+	envsubst < kustomization.tpl > kustomization.yaml
+	$(KBCTL) apply -k .
+	rm -f kustomization.yaml
 
 destroy:
-	envsubst < kustomization.yaml | $(KBCTL) delete -k -
+	envsubst < kustomization.tpl > kustomization.yaml
+	$(KBCTL) delete -k .
+	rm -f kustomization.yaml
 
 setup-example:
 	$(KBCTL) apply -k ./example/

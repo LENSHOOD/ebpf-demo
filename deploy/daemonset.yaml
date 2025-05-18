@@ -16,7 +16,7 @@ spec:
       dnsPolicy: ClusterFirstWithHostNet
       containers:
       - name: ebpf-demo-collector
-        image: fake-image
+        image: ebpf-demo-collector-image
         imagePullPolicy: Always
         securityContext:
           privileged: true
