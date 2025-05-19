@@ -5,7 +5,6 @@ import (
 	"bytes"
 	crand "crypto/rand"
 	"encoding/binary"
-	"fmt"
 	"math/rand"
 	"strings"
 	"time"
@@ -60,7 +59,7 @@ const HttpVersion = "Version"
 const HttpStatus = "Status"
 const BodyContent = "Content"
 
-func generateEbpfTraces(l4Event *L4Event) ptrace.Traces {
+func (rcvr *ebpfReceiver) generateEbpfTraces(l4Event *L4Event) ptrace.Traces {
 	traces := ptrace.NewTraces()
 	traceId := NewTraceID()
 
@@ -136,14 +135,14 @@ func tryHttp(data []byte, attrs pcommon.Map) {
 			if len(parts) < 3 {
 				return
 			}
-		
+
 			firstSegment := parts[0]
 			if strings.HasPrefix(firstSegment, "HTTP") {
 				attrs.PutInt(TrafficType, int64(HTTP_RESP))
 				attrs.PutStr(HttpVersion, firstSegment)
 				attrs.PutStr(HttpStatus, parts[1]+" "+parts[2])
 			}
-		
+
 			if strings.HasPrefix(firstSegment, "GET") ||
 				strings.HasPrefix(firstSegment, "POST") ||
 				strings.HasPrefix(firstSegment, "PUT") ||
@@ -178,7 +177,7 @@ func tryDNS(data []byte, attrs pcommon.Map) {
 	var msg dnsmessage.Message
 	_ = msg.Unpack(data)
 
-	fmt.Printf("DNS: %s\n", msg.GoString())
+	Logger().Sugar().Debugf("DNS: %s\n", msg.GoString())
 	if !msg.Header.Response {
 		attrs.PutInt(TrafficType, int64(DNS_REQ))
 	} else {
