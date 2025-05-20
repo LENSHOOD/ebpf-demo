@@ -3,6 +3,7 @@ package ebpf_receiver
 import (
 	"bufio"
 	"bytes"
+	"context"
 	crand "crypto/rand"
 	"encoding/binary"
 	"math/rand"
@@ -12,6 +13,8 @@ import (
 	"github.com/google/uuid"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/ptrace"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/net/dns/dnsmessage"
 	"golang.org/x/sys/unix"
 )
@@ -59,33 +62,62 @@ const HttpVersion = "Version"
 const HttpStatus = "Status"
 const BodyContent = "Content"
 
+const OtelTraceParent = "traceparent"
+const OtelTraceState = "tracestate"
+
 func (rcvr *ebpfReceiver) generateEbpfTraces(l4Event *L4Event) ptrace.Traces {
+	srcAttributes := pcommon.NewMap()
+	fillResourceWithAttributes(&srcAttributes, l4Event, NodeSrc)
+
+	destAttributes := pcommon.NewMap()
+	fillResourceWithAttributes(&destAttributes, l4Event, NodeDest)
+
+	bodyAttributes := pcommon.NewMap()
+	fillResourceWithAttributes(&bodyAttributes, l4Event, Body)
+
 	traces := ptrace.NewTraces()
+
+	trafficType := getInt(&bodyAttributes, TrafficType)
+	traceParent, traceState := "", ""
+	if trafficType == int64(HTTP_REQ) || trafficType == int64(HTTP_RESP) {
+		traceParent = getStr(&bodyAttributes, OtelTraceParent)
+		traceState = getStr(&bodyAttributes, OtelTraceState)
+	}
+
 	traceId := NewTraceID()
+	parentSpanId := pcommon.NewSpanIDEmpty()
+	if traceParent != "" {
+		var propagator = propagation.TraceContext{}
+		carrier := propagation.HeaderCarrier{}
+		carrier.Set("traceparent", traceParent)
+		if traceState != "" {
+			carrier.Set("tracestate", traceState)
+		}
+		ctx := propagator.Extract(context.Background(), carrier)
+		parentSpanCtx := trace.SpanContextFromContext(ctx)
+		traceId = pcommon.TraceID(parentSpanCtx.TraceID())
+		parentSpanId = pcommon.SpanID(parentSpanCtx.SpanID())
+	}
 
 	srcRsSpan := traces.ResourceSpans().AppendEmpty()
 	srcRs := srcRsSpan.Resource()
-	fillResourceWithAttributes(&srcRs, l4Event, NodeSrc)
-	srcScope := appendScopeSpans(&srcRsSpan)
-	appendTraceSpans(&srcScope, traceId, SrcSpanName)
+	srcAttributes.CopyTo(srcRs.Attributes())
+	appendTraceSpans(&srcRsSpan, traceId, SrcSpanName, parentSpanId)
 
 	destRsSpan := traces.ResourceSpans().AppendEmpty()
 	destRs := destRsSpan.Resource()
-	fillResourceWithAttributes(&destRs, l4Event, NodeDest)
-	destScope := appendScopeSpans(&destRsSpan)
-	appendTraceSpans(&destScope, traceId, DestSpanName)
+	destAttributes.CopyTo(destRs.Attributes())
+	appendTraceSpans(&destRsSpan, traceId, DestSpanName, parentSpanId)
 
 	bodyRsSpan := traces.ResourceSpans().AppendEmpty()
 	bodyRs := bodyRsSpan.Resource()
-	fillResourceWithAttributes(&bodyRs, l4Event, Body)
-	bodyScope := appendScopeSpans(&bodyRsSpan)
-	appendTraceSpans(&bodyScope, traceId, BodySpanName)
+	bodyAttributes.CopyTo(bodyRs.Attributes())
+	appendTraceSpans(&bodyRsSpan, traceId, BodySpanName, parentSpanId)
 
 	return traces
 }
 
-func fillResourceWithAttributes(resource *pcommon.Resource, event *L4Event, direction Kind) {
-	attrs := resource.Attributes()
+func fillResourceWithAttributes(attrs *pcommon.Map, event *L4Event, direction Kind) {
 	attrs.PutInt(Timestamp, int64(event.TimestampNs))
 	attrs.PutInt(DirectionKey, int64(direction))
 	attrs.PutStr(ServiceName, "ebpf-receiver")
@@ -117,11 +149,10 @@ func fillResourceWithAttributes(resource *pcommon.Resource, event *L4Event, dire
 				tryDNS(data, attrs)
 			}
 		}
-
 	}
 }
 
-func tryHttp(data []byte, attrs pcommon.Map) {
+func tryHttp(data []byte, attrs *pcommon.Map) {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 
 	lineNum := 0
@@ -130,6 +161,7 @@ func tryHttp(data []byte, attrs pcommon.Map) {
 		if line == "" {
 			break
 		}
+		Logger().Sugar().Infof("HTTP RAW: %s", line)
 		if lineNum == 0 {
 			parts := strings.Fields(line)
 			if len(parts) < 3 {
@@ -173,7 +205,7 @@ func tryHttp(data []byte, attrs pcommon.Map) {
 	}
 }
 
-func tryDNS(data []byte, attrs pcommon.Map) {
+func tryDNS(data []byte, attrs *pcommon.Map) {
 	var msg dnsmessage.Message
 	_ = msg.Unpack(data)
 
@@ -199,13 +231,6 @@ func buildTrafficIdentifier(event *L4Event) int64 {
 	return int64(minIP)<<48 | int64(minPort)<<32 | int64(maxIP)<<16 | int64(maxPort)
 }
 
-func appendScopeSpans(resourceSpans *ptrace.ResourceSpans) ptrace.ScopeSpans {
-	scopeSpans := resourceSpans.ScopeSpans().AppendEmpty()
-	scopeSpans.Scope().SetName("ebpf-receiver")
-	scopeSpans.Scope().SetVersion("1.0.0")
-	return scopeSpans
-}
-
 func NewTraceID() pcommon.TraceID {
 	return pcommon.TraceID(uuid.New())
 }
@@ -222,10 +247,14 @@ func NewSpanID() pcommon.SpanID {
 	return spanID
 }
 
-func appendTraceSpans(scopeSpans *ptrace.ScopeSpans, traceId pcommon.TraceID, spanName string) {
+func appendTraceSpans(resourceSpans *ptrace.ResourceSpans, traceId pcommon.TraceID, spanName string, parentSpanId pcommon.SpanID) {
+	scopeSpans := resourceSpans.ScopeSpans().AppendEmpty()
+	scopeSpans.Scope().SetName("ebpf-receiver")
+	scopeSpans.Scope().SetVersion("1.0.0")
+
 	span := scopeSpans.Spans().AppendEmpty()
 	span.SetTraceID(traceId)
-	span.SetParentSpanID(pcommon.NewSpanIDEmpty())
+	span.SetParentSpanID(parentSpanId)
 	span.SetSpanID(NewSpanID())
 	span.SetName(spanName)
 	span.SetKind(ptrace.SpanKindClient)
@@ -235,4 +264,20 @@ func appendTraceSpans(scopeSpans *ptrace.ScopeSpans, traceId pcommon.TraceID, sp
 	span.Attributes().PutStr(ServiceName, "ebpf-receiver")
 	span.Events().AppendEmpty()
 	span.Links().AppendEmpty()
+}
+
+func getInt(attr *pcommon.Map, key string) int64 {
+	if v, exist := attr.Get(key); exist {
+		return v.Int()
+	}
+
+	return -1
+}
+
+func getStr(attr *pcommon.Map, key string) string {
+	if v, exist := attr.Get(key); exist {
+		return v.Str()
+	}
+
+	return ""
 }
