@@ -17,7 +17,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-type L4Event struct {
+type Header struct {
 	TimestampNs uint64
 	Protocol    uint32
 	SrcIP       uint32
@@ -25,7 +25,11 @@ type L4Event struct {
 	SrcPort     uint16
 	DstPort     uint16
 	DataLength  uint16
-	Data        [80]byte
+}
+
+type L4Event struct {
+	Header Header
+	Data   [512]byte
 }
 
 type BPFObjects struct {
@@ -124,11 +128,20 @@ func (rcvr *ebpfReceiver) listen(ctx context.Context) func() {
 					}
 
 					var event L4Event
-					err = binary.Read(bytes.NewBuffer(record.RawSample), HostOrder, &event)
-					if err != nil {
+					buf := bytes.NewBuffer(record.RawSample)
+					if err := binary.Read(buf, HostOrder, &event.Header); err != nil {
 						if err != io.EOF {
-							Logger().Sugar().Errorf("Failed to parse event: %v", err)
+							Logger().Sugar().Errorf("Failed to parse event header: %v", err)
 						}
+						continue
+					}
+					dataLen := int(event.Header.DataLength)
+					if dataLen > len(event.Data) {
+						dataLen = len(event.Data)
+					}
+
+					if _, err := buf.Read(event.Data[:dataLen]); err != nil {
+						Logger().Sugar().Errorf("Failed to parse event data: %v", err)
 						continue
 					}
 
@@ -136,7 +149,13 @@ func (rcvr *ebpfReceiver) listen(ctx context.Context) func() {
 						continue
 					}
 
-					Logger().Sugar().Debugf("L4 Packaet: from %s:%d, to %s:%d, protocal: %d, len: %d\n", u32ToIPv4(ntoh(event.SrcIP)), ntohs(event.SrcPort), u32ToIPv4(ntoh(event.DstIP)), ntohs(event.DstPort), event.Protocol, event.DataLength)
+					Logger().Sugar().Debugf("L4 Packaet: from %s:%d, to %s:%d, protocal: %d, len: %d\n", 
+						u32ToIPv4(ntoh(event.Header.SrcIP)), 
+						ntohs(event.Header.SrcPort), 
+						u32ToIPv4(ntoh(event.Header.DstIP)), 
+						ntohs(event.Header.DstPort), 
+						event.Header.Protocol, 
+						event.Header.DataLength)
 					_ = rcvr.nextConsumer.ConsumeTraces(ctx, rcvr.generateEbpfTraces(&event))
 				}
 			}
@@ -149,7 +168,7 @@ func allows(filter string, event L4Event) bool {
 		return true
 	}
 
-	ip := u32ToIPv4(ntoh(event.SrcIP))
+	ip := u32ToIPv4(ntoh(event.Header.SrcIP))
 	re := regexp.MustCompile(filter)
 	return re.MatchString(ip)
 }

@@ -7,7 +7,7 @@
 #define IP_TCP 6
 #define ETH_P_IP 0x0800
 #define ETH_HLEN 14
-#define MAX_PACK_SIZE 80
+#define MAX_PACK_SIZE 512
 
 struct l4_event_t {
     __u64 timestamp_ns;

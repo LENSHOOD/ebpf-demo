@@ -97,6 +97,7 @@ func (rcvr *ebpfReceiver) generateEbpfTraces(l4Event *L4Event) ptrace.Traces {
 		parentSpanCtx := trace.SpanContextFromContext(ctx)
 		traceId = pcommon.TraceID(parentSpanCtx.TraceID())
 		parentSpanId = pcommon.SpanID(parentSpanCtx.SpanID())
+		Logger().Sugar().Infof("TraceParent: %s, TraceState: %s, TraceId: %s, ParentSpan: %s", traceParent, traceState, traceId.String(), parentSpanId.String())
 	}
 
 	srcRsSpan := traces.ResourceSpans().AppendEmpty()
@@ -118,34 +119,34 @@ func (rcvr *ebpfReceiver) generateEbpfTraces(l4Event *L4Event) ptrace.Traces {
 }
 
 func fillResourceWithAttributes(attrs *pcommon.Map, event *L4Event, direction Kind) {
-	attrs.PutInt(Timestamp, int64(event.TimestampNs))
+	attrs.PutInt(Timestamp, int64(event.Header.TimestampNs))
 	attrs.PutInt(DirectionKey, int64(direction))
 	attrs.PutStr(ServiceName, "ebpf-receiver")
 	switch direction {
 	case NodeSrc:
-		attrs.PutStr(MetadataIp, u32ToIPv4(ntoh(event.SrcIP)))
+		attrs.PutStr(MetadataIp, u32ToIPv4(ntoh(event.Header.SrcIP)))
 	case NodeDest:
-		attrs.PutStr(MetadataIp, u32ToIPv4(ntoh(event.DstIP)))
+		attrs.PutStr(MetadataIp, u32ToIPv4(ntoh(event.Header.DstIP)))
 	case Body:
-		endOfData := int(event.DataLength)
+		endOfData := int(event.Header.DataLength)
 		if endOfData > len(event.Data) {
 			endOfData = len(event.Data)
 		}
 		data := event.Data[:endOfData]
 		attrs.PutStr(BodyContent, string(data))
 		attrs.PutInt(MetadataTrafficIdentifier, buildTrafficIdentifier(event))
-		attrs.PutStr(MetadataSrc, u32ToIPv4(ntoh(event.SrcIP)))
-		attrs.PutStr(MetadataDest, u32ToIPv4(ntoh(event.DstIP)))
-		attrs.PutInt(MetadataSrcPort, int64(ntohs(event.SrcPort)))
-		attrs.PutInt(MetadataDestPort, int64(ntohs(event.DstPort)))
+		attrs.PutStr(MetadataSrc, u32ToIPv4(ntoh(event.Header.SrcIP)))
+		attrs.PutStr(MetadataDest, u32ToIPv4(ntoh(event.Header.DstIP)))
+		attrs.PutInt(MetadataSrcPort, int64(ntohs(event.Header.SrcPort)))
+		attrs.PutInt(MetadataDestPort, int64(ntohs(event.Header.DstPort)))
 
-		switch event.Protocol {
+		switch event.Header.Protocol {
 		case unix.IPPROTO_TCP:
 			attrs.PutInt(TrafficType, int64(TCP))
 			tryHttp(data, attrs)
 		case unix.IPPROTO_UDP:
 			attrs.PutInt(TrafficType, int64(UDP))
-			if ntohs(event.SrcPort) == 53 || ntohs(event.DstPort) == 53 {
+			if ntohs(event.Header.SrcPort) == 53 || ntohs(event.Header.DstPort) == 53 {
 				tryDNS(data, attrs)
 			}
 		}
@@ -161,7 +162,7 @@ func tryHttp(data []byte, attrs *pcommon.Map) {
 		if line == "" {
 			break
 		}
-		Logger().Sugar().Infof("HTTP RAW: %s", line)
+		Logger().Sugar().Debugf("HTTP RAW: %s", line)
 		if lineNum == 0 {
 			parts := strings.Fields(line)
 			if len(parts) < 3 {
@@ -194,6 +195,8 @@ func tryHttp(data []byte, attrs *pcommon.Map) {
 				key := strings.TrimSpace(line[:colonIndex])
 				val := strings.TrimSpace(line[colonIndex+1:])
 				if key == "traceparent" {
+					Logger().Sugar().Infof("traceparent: %s", val)
+					Logger().Sugar().Infof("data: %v", data)
 					attrs.PutStr("traceparent", val)
 				}
 				if key == "tracestate" {
@@ -219,7 +222,7 @@ func tryDNS(data []byte, attrs *pcommon.Map) {
 }
 
 func buildTrafficIdentifier(event *L4Event) int64 {
-	minIP, minPort, maxIP, maxPort := ntoh(event.SrcIP), ntohs(event.SrcPort), ntoh(event.DstIP), ntohs(event.DstPort)
+	minIP, minPort, maxIP, maxPort := ntoh(event.Header.SrcIP), ntohs(event.Header.SrcPort), ntoh(event.Header.DstIP), ntohs(event.Header.DstPort)
 	if minIP > maxIP {
 		minIP, maxIP = maxIP, minIP
 	}
