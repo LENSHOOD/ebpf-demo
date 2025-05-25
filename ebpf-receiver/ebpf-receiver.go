@@ -18,7 +18,7 @@ import (
 )
 
 type Header struct {
-	TimestampNs uint64
+	MonoTimestampNs uint64
 	Protocol    uint32
 	SrcIP       uint32
 	DstIP       uint32
@@ -29,7 +29,7 @@ type Header struct {
 
 type L4Event struct {
 	Header Header
-	Data   [512]byte
+	Data   [1024]byte
 }
 
 type BPFObjects struct {

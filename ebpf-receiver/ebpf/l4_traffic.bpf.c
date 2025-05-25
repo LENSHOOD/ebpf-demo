@@ -7,10 +7,10 @@
 #define IP_TCP 6
 #define ETH_P_IP 0x0800
 #define ETH_HLEN 14
-#define MAX_PACK_SIZE 512
+#define MAX_PACK_SIZE 1024
 
 struct l4_event_t {
-    __u64 timestamp_ns;
+    __u64 mono_timestamp_ns;
     __u32 protocol;
     __u32 src_ip;
     __u32 dst_ip;
@@ -120,7 +120,7 @@ int net_filter(struct __sk_buff *skb) {
 		return 0;
 	}
 
-    event->timestamp_ns = bpf_ktime_get_ns();
+    event->mono_timestamp_ns = bpf_ktime_get_ns();
     event->protocol = ip.protocol;
     event->src_ip = ip.saddr;
     event->dst_ip = ip.daddr;

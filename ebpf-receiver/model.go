@@ -4,13 +4,10 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	crand "crypto/rand"
-	"encoding/binary"
-	"math/rand"
+	"crypto/rand"
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	"go.opentelemetry.io/otel/propagation"
@@ -26,7 +23,6 @@ const (
 	NodeDest
 	Body
 )
-const Timestamp = "timestamp"
 const DirectionKey = "direction"
 const SrcSpanName = "tcp_event_src"
 const DestSpanName = "tcp_event_dest"
@@ -66,16 +62,8 @@ const OtelTraceParent = "traceparent"
 const OtelTraceState = "tracestate"
 
 func (rcvr *ebpfReceiver) generateEbpfTraces(l4Event *L4Event) ptrace.Traces {
-	srcAttributes := pcommon.NewMap()
-	fillResourceWithAttributes(&srcAttributes, l4Event, NodeSrc)
-
-	destAttributes := pcommon.NewMap()
-	fillResourceWithAttributes(&destAttributes, l4Event, NodeDest)
-
 	bodyAttributes := pcommon.NewMap()
-	fillResourceWithAttributes(&bodyAttributes, l4Event, Body)
-
-	traces := ptrace.NewTraces()
+	fillResourceWithAttributes(&bodyAttributes, l4Event)
 
 	trafficType := getInt(&bodyAttributes, TrafficType)
 	traceParent, traceState := "", ""
@@ -97,60 +85,62 @@ func (rcvr *ebpfReceiver) generateEbpfTraces(l4Event *L4Event) ptrace.Traces {
 		parentSpanCtx := trace.SpanContextFromContext(ctx)
 		traceId = pcommon.TraceID(parentSpanCtx.TraceID())
 		parentSpanId = pcommon.SpanID(parentSpanCtx.SpanID())
-		Logger().Sugar().Infof("TraceParent: %s, TraceState: %s, TraceId: %s, ParentSpan: %s", traceParent, traceState, traceId.String(), parentSpanId.String())
+		Logger().Sugar().Debugf("TraceParent: %s, TraceState: %s, TraceId: %s, ParentSpan: %s", traceParent, traceState, traceId.String(), parentSpanId.String())
 	}
 
-	srcRsSpan := traces.ResourceSpans().AppendEmpty()
-	srcRs := srcRsSpan.Resource()
-	srcAttributes.CopyTo(srcRs.Attributes())
-	appendTraceSpans(&srcRsSpan, traceId, SrcSpanName, parentSpanId)
+	trace, span, rs := getSpanWithRs(traceId, parentSpanId)
+	bodyAttributes.CopyTo(rs.Attributes())
 
-	destRsSpan := traces.ResourceSpans().AppendEmpty()
-	destRs := destRsSpan.Resource()
-	destAttributes.CopyTo(destRs.Attributes())
-	appendTraceSpans(&destRsSpan, traceId, DestSpanName, parentSpanId)
+	ts := time.Now().UTC().UnixNano()
+	span.SetStartTimestamp(pcommon.Timestamp(ts))
+	span.SetEndTimestamp(pcommon.Timestamp(ts + 1_000_000))
 
-	bodyRsSpan := traces.ResourceSpans().AppendEmpty()
-	bodyRs := bodyRsSpan.Resource()
-	bodyAttributes.CopyTo(bodyRs.Attributes())
-	appendTraceSpans(&bodyRsSpan, traceId, BodySpanName, parentSpanId)
-
-	return traces
+	return trace
 }
 
-func fillResourceWithAttributes(attrs *pcommon.Map, event *L4Event, direction Kind) {
-	attrs.PutInt(Timestamp, int64(event.Header.TimestampNs))
-	attrs.PutInt(DirectionKey, int64(direction))
+func fillResourceWithAttributes(attrs *pcommon.Map, event *L4Event) {
+	endOfData := int(event.Header.DataLength)
+	if endOfData > len(event.Data) {
+		endOfData = len(event.Data)
+	}
+	data := event.Data[:endOfData]
 	attrs.PutStr(ServiceName, "ebpf-receiver")
-	switch direction {
-	case NodeSrc:
-		attrs.PutStr(MetadataIp, u32ToIPv4(ntoh(event.Header.SrcIP)))
-	case NodeDest:
-		attrs.PutStr(MetadataIp, u32ToIPv4(ntoh(event.Header.DstIP)))
-	case Body:
-		endOfData := int(event.Header.DataLength)
-		if endOfData > len(event.Data) {
-			endOfData = len(event.Data)
-		}
-		data := event.Data[:endOfData]
-		attrs.PutStr(BodyContent, string(data))
-		attrs.PutInt(MetadataTrafficIdentifier, buildTrafficIdentifier(event))
-		attrs.PutStr(MetadataSrc, u32ToIPv4(ntoh(event.Header.SrcIP)))
-		attrs.PutStr(MetadataDest, u32ToIPv4(ntoh(event.Header.DstIP)))
-		attrs.PutInt(MetadataSrcPort, int64(ntohs(event.Header.SrcPort)))
-		attrs.PutInt(MetadataDestPort, int64(ntohs(event.Header.DstPort)))
+	attrs.PutStr(BodyContent, string(data))
+	attrs.PutInt(MetadataTrafficIdentifier, buildTrafficIdentifier(event))
+	attrs.PutStr(MetadataSrc, u32ToIPv4(ntoh(event.Header.SrcIP)))
+	attrs.PutStr(MetadataDest, u32ToIPv4(ntoh(event.Header.DstIP)))
+	attrs.PutInt(MetadataSrcPort, int64(ntohs(event.Header.SrcPort)))
+	attrs.PutInt(MetadataDestPort, int64(ntohs(event.Header.DstPort)))
 
-		switch event.Header.Protocol {
-		case unix.IPPROTO_TCP:
-			attrs.PutInt(TrafficType, int64(TCP))
-			tryHttp(data, attrs)
-		case unix.IPPROTO_UDP:
-			attrs.PutInt(TrafficType, int64(UDP))
-			if ntohs(event.Header.SrcPort) == 53 || ntohs(event.Header.DstPort) == 53 {
-				tryDNS(data, attrs)
-			}
+	switch event.Header.Protocol {
+	case unix.IPPROTO_TCP:
+		attrs.PutInt(TrafficType, int64(TCP))
+		tryHttp(data, attrs)
+	case unix.IPPROTO_UDP:
+		attrs.PutInt(TrafficType, int64(UDP))
+		if ntohs(event.Header.SrcPort) == 53 || ntohs(event.Header.DstPort) == 53 {
+			tryDNS(data, attrs)
 		}
 	}
+}
+
+func getSpanWithRs(traceId pcommon.TraceID, parentSpanId pcommon.SpanID) (ptrace.Traces, ptrace.Span, pcommon.Resource) {
+	traces := ptrace.NewTraces()
+	ebpfSpan := traces.ResourceSpans().AppendEmpty()
+	ebpfRs := ebpfSpan.Resource()
+	scopeSpans := ebpfSpan.ScopeSpans().AppendEmpty()
+	scopeSpans.Scope().SetName("ebpf-receiver")
+	scopeSpans.Scope().SetVersion("1.0.0")
+
+	span := scopeSpans.Spans().AppendEmpty()
+	span.SetTraceID(traceId)
+	span.SetParentSpanID(parentSpanId)
+	span.SetSpanID(NewSpanID())
+	span.SetName("ebpf-net-traffic")
+	span.SetKind(ptrace.SpanKindClient)
+	span.Status().SetCode(ptrace.StatusCodeOk)
+
+	return traces, span, ebpfRs
 }
 
 func tryHttp(data []byte, attrs *pcommon.Map) {
@@ -195,8 +185,6 @@ func tryHttp(data []byte, attrs *pcommon.Map) {
 				key := strings.TrimSpace(line[:colonIndex])
 				val := strings.TrimSpace(line[colonIndex+1:])
 				if key == "traceparent" {
-					Logger().Sugar().Infof("traceparent: %s", val)
-					Logger().Sugar().Infof("data: %v", data)
 					attrs.PutStr("traceparent", val)
 				}
 				if key == "tracestate" {
@@ -235,38 +223,15 @@ func buildTrafficIdentifier(event *L4Event) int64 {
 }
 
 func NewTraceID() pcommon.TraceID {
-	return pcommon.TraceID(uuid.New())
+    var id [16]byte
+    rand.Read(id[:])
+    return pcommon.TraceID(id)
 }
 
 func NewSpanID() pcommon.SpanID {
-	var rngSeed int64
-	_ = binary.Read(crand.Reader, binary.LittleEndian, &rngSeed)
-	randSource := rand.New(rand.NewSource(rngSeed))
-
-	var sid [8]byte
-	randSource.Read(sid[:])
-	spanID := pcommon.SpanID(sid)
-
-	return spanID
-}
-
-func appendTraceSpans(resourceSpans *ptrace.ResourceSpans, traceId pcommon.TraceID, spanName string, parentSpanId pcommon.SpanID) {
-	scopeSpans := resourceSpans.ScopeSpans().AppendEmpty()
-	scopeSpans.Scope().SetName("ebpf-receiver")
-	scopeSpans.Scope().SetVersion("1.0.0")
-
-	span := scopeSpans.Spans().AppendEmpty()
-	span.SetTraceID(traceId)
-	span.SetParentSpanID(parentSpanId)
-	span.SetSpanID(NewSpanID())
-	span.SetName(spanName)
-	span.SetKind(ptrace.SpanKindClient)
-	span.Status().SetCode(ptrace.StatusCodeOk)
-	span.SetStartTimestamp(pcommon.Timestamp(time.Now().UnixNano()))
-	span.SetEndTimestamp(pcommon.Timestamp(time.Now().UnixNano() + 1_000_000))
-	span.Attributes().PutStr(ServiceName, "ebpf-receiver")
-	span.Events().AppendEmpty()
-	span.Links().AppendEmpty()
+    var id [8]byte
+    rand.Read(id[:])
+    return pcommon.SpanID(id)
 }
 
 func getInt(attr *pcommon.Map, key string) int64 {
