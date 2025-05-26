@@ -25,6 +25,8 @@ build: build-ebpf build-collector
 build-collector:
 	$(GO_ENV) ./ocb --config builder-config.yaml
 build-ebpf: $(BPF_OBJ)
+build-collector-debug: 
+	$(GO_ENV) ./ocb --ldflags="" --gcflags="all=-N -l" --verbose --config builder-config.yaml
 
 $(BPF_OBJ): $(BPF_SRC)
 	@echo "Building eBPF program..."
@@ -35,6 +37,11 @@ run-local:
 
 build-image:
 	$(DOCKER) build -t $(IMAGE_NAME):$(IMAGE_TAG) .
+	$(DOCKER) tag $(IMAGE_NAME):$(IMAGE_TAG) $(DOCKER_REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)
+	$(DOCKER) push $(DOCKER_REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)
+
+build-image-debug:
+	$(DOCKER) build -t $(IMAGE_NAME):$(IMAGE_TAG) -f Dockerfile.debug .
 	$(DOCKER) tag $(IMAGE_NAME):$(IMAGE_TAG) $(DOCKER_REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)
 	$(DOCKER) push $(DOCKER_REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)
 

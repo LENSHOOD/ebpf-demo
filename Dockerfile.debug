@@ -1,0 +1,15 @@
+FROM golang:1.24 AS builder
+
+RUN go install github.com/go-delve/delve/cmd/dlv@latest
+
+FROM ubuntu:22.04
+WORKDIR /app
+
+COPY --from=builder /go/bin/dlv /usr/local/bin/dlv
+
+RUN mkdir -p ebpf-receiver/ebpf/ & mkdir -p otelcol-ebpf-demo & mkdir -p db_init & mkdir -p collector-config
+COPY otelcol-ebpf-demo/ebpf-demo-collector otelcol-ebpf-demo/
+
+EXPOSE 8000 40000
+
+CMD ["dlv", "exec", "./otelcol-ebpf-demo/ebpf-demo-collector", "--continue", "--headless", "--listen=:40000", "--api-version=2", "--accept-multiclient", "--log", "--", "--config", "./collector-config/config.yaml"]
