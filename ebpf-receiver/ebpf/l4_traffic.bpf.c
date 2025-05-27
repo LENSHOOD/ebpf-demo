@@ -8,6 +8,7 @@
 #define ETH_P_IP 0x0800
 #define ETH_HLEN 14
 #define MAX_PACK_SIZE 1024
+#define DATA_LOAD_OFFSET 64
 
 struct l4_event_t {
     __u64 mono_timestamp_ns;
@@ -60,9 +61,6 @@ int net_filter(struct __sk_buff *skb) {
         return 0;
     }
 
-//    event.src_ip = ip.saddr;
-//    event.dst_ip = ip.daddr;
-//    event.protocol = ip.protocol;
     __u8 iphdr_len = ip.ihl * 4;
     __u16 ip_pkt_tlen = __bpf_ntohs(ip.tot_len);
 
@@ -82,9 +80,6 @@ int net_filter(struct __sk_buff *skb) {
             __u8 tcphdr_len = tcp.doff * 4;
             l4_payload_len = ip_pkt_tlen - iphdr_len - tcphdr_len;
             payload_offset = l4_offset + tcphdr_len;
-//            if (bpf_skb_load_bytes(skb, l4_offset + tcphdr_len, &event.data, MAX_PACK_SIZE) < 0) {
-//                return 0;
-//            }
             break;
         }
 
@@ -100,7 +95,6 @@ int net_filter(struct __sk_buff *skb) {
             __u8 udphdr_len = sizeof(udp);
             __u16 l4_payload_len = ip_pkt_tlen - iphdr_len - udphdr_len;
             payload_offset = l4_offset + udphdr_len;
-//            bpf_skb_load_bytes(skb, l4_offset + udphdr_len, &event.data, MAX_PACK_SIZE);
             break;
         }
 
@@ -127,11 +121,18 @@ int net_filter(struct __sk_buff *skb) {
     event->src_port = src_port;
     event->dst_port = dst_port;
     event->data_len = l4_payload_len;
-    bpf_skb_load_bytes(skb, payload_offset, event->data, MAX_PACK_SIZE);
+
+    __u16 copy_len = l4_payload_len > MAX_PACK_SIZE ? MAX_PACK_SIZE : l4_payload_len;
+    __u16 max_round = copy_len / DATA_LOAD_OFFSET;
+    for (__u8 i = 0, off = 0; i < max_round; i++, off += DATA_LOAD_OFFSET) {
+        if (bpf_skb_load_bytes(skb, payload_offset + off, event->data + off, DATA_LOAD_OFFSET) < 0) {
+            break;
+        }
+    }
+
+    // bpf_skb_load_bytes(skb, payload_offset, event->data, MAX_PACK_SIZE);
 
     bpf_ringbuf_submit(event, 0);
-//    __builtin_memcpy(event.data, packet_body, sizeof(packet_body));
-//    bpf_perf_event_output(skb, &l4_events, BPF_F_CURRENT_CPU, &event, sizeof(event));
 
     return 0;
 }
