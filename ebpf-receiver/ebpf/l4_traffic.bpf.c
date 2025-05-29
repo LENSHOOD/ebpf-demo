@@ -8,7 +8,7 @@
 #define ETH_P_IP 0x0800
 #define ETH_HLEN 14
 #define MAX_PACK_SIZE 1024
-#define DATA_LOAD_OFFSET 64
+#define DATA_LOAD_OFFSET 5
 
 struct l4_event_t {
     __u64 mono_timestamp_ns;
@@ -124,11 +124,19 @@ int net_filter(struct __sk_buff *skb) {
 
     __u16 copy_len = l4_payload_len > MAX_PACK_SIZE ? MAX_PACK_SIZE : l4_payload_len;
     __u16 max_round = copy_len / DATA_LOAD_OFFSET;
-    for (__u8 i = 0, off = 0; i < max_round; i++, off += DATA_LOAD_OFFSET) {
+    
+    __u16 cursor = 0;
+    for (__u8 i = 0, off = 0; i < max_round; i++, off += DATA_LOAD_OFFSET, cursor = off) {
         if (bpf_skb_load_bytes(skb, payload_offset + off, event->data + off, DATA_LOAD_OFFSET) < 0) {
             break;
         }
     }
+
+    // Workaround for sending complete data (DATA_LOAD_OFFSET == 5)
+    bpf_skb_load_bytes(skb, payload_offset + cursor, event->data + cursor, 1);
+    bpf_skb_load_bytes(skb, payload_offset + cursor + 1, event->data + cursor + 1, 1);
+    bpf_skb_load_bytes(skb, payload_offset + cursor + 2, event->data + cursor + 2, 1);
+    bpf_skb_load_bytes(skb, payload_offset + cursor + 3, event->data + cursor + 3, 1);
 
     // bpf_skb_load_bytes(skb, payload_offset, event->data, MAX_PACK_SIZE);
 
