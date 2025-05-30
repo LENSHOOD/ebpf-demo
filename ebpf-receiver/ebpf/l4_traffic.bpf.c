@@ -8,7 +8,16 @@
 #define ETH_P_IP 0x0800
 #define ETH_HLEN 14
 #define MAX_PACK_SIZE 1024
-#define DATA_LOAD_OFFSET 5
+#define DATA_LOAD_OFFSET_512 512
+#define DATA_LOAD_OFFSET_256 256
+#define DATA_LOAD_OFFSET_128 128
+#define DATA_LOAD_OFFSET_64 64
+#define DATA_LOAD_OFFSET_32 32
+#define DATA_LOAD_OFFSET_16 16
+#define DATA_LOAD_OFFSET_8 8
+#define DATA_LOAD_OFFSET_4 4
+#define DATA_LOAD_OFFSET_2 2
+#define DATA_LOAD_OFFSET_1 1
 
 struct l4_event_t {
     __u64 mono_timestamp_ns;
@@ -33,6 +42,82 @@ static inline int ip_is_fragment(struct __sk_buff *skb, __u32 nhoff)
 	bpf_skb_load_bytes(skb, nhoff + offsetof(struct iphdr, frag_off), &frag_off, 2);
 	frag_off = __bpf_ntohs(frag_off);
 	return frag_off & (IP_MF | IP_OFFSET);
+}
+
+int copy_event_data(struct __sk_buff *skb, struct l4_event_t *event, __u16 payload_offset, __u16 l4_payload_len) {
+    if (skb == 0 || event == 0) {
+        return -1;
+    }
+
+    __u16 copy_remain_bytes = l4_payload_len > MAX_PACK_SIZE ? MAX_PACK_SIZE : l4_payload_len;
+    __u16 copy_offset = 0;
+    if (copy_remain_bytes >= MAX_PACK_SIZE) {
+        bpf_skb_load_bytes(skb, payload_offset + copy_offset, event->data + copy_offset, MAX_PACK_SIZE);
+        copy_offset += MAX_PACK_SIZE;
+        copy_remain_bytes -= MAX_PACK_SIZE;
+    }
+
+    if (copy_remain_bytes >= DATA_LOAD_OFFSET_512) {
+        bpf_skb_load_bytes(skb, payload_offset + copy_offset, event->data + copy_offset, DATA_LOAD_OFFSET_512);
+        copy_offset += DATA_LOAD_OFFSET_512;
+        copy_remain_bytes -= DATA_LOAD_OFFSET_512;
+    }
+    
+    if (copy_remain_bytes >= DATA_LOAD_OFFSET_256) {
+        bpf_skb_load_bytes(skb, payload_offset + copy_offset, event->data + copy_offset, DATA_LOAD_OFFSET_256);
+        copy_offset += DATA_LOAD_OFFSET_256;
+        copy_remain_bytes -= DATA_LOAD_OFFSET_256;
+    }
+    
+    if (copy_remain_bytes >= DATA_LOAD_OFFSET_128) {
+        bpf_skb_load_bytes(skb, payload_offset + copy_offset, event->data + copy_offset, DATA_LOAD_OFFSET_128);
+        copy_offset += DATA_LOAD_OFFSET_128;
+        copy_remain_bytes -= DATA_LOAD_OFFSET_128;
+    }
+    
+    if (copy_remain_bytes >= DATA_LOAD_OFFSET_64) {
+        bpf_skb_load_bytes(skb, payload_offset + copy_offset, event->data + copy_offset, DATA_LOAD_OFFSET_64);
+        copy_offset += DATA_LOAD_OFFSET_64;
+        copy_remain_bytes -= DATA_LOAD_OFFSET_64;
+    }
+    
+    if (copy_remain_bytes >= DATA_LOAD_OFFSET_32) {
+        bpf_skb_load_bytes(skb, payload_offset + copy_offset, event->data + copy_offset, DATA_LOAD_OFFSET_32);
+        copy_offset += DATA_LOAD_OFFSET_32;
+        copy_remain_bytes -= DATA_LOAD_OFFSET_32;
+    }
+    
+    if (copy_remain_bytes >= DATA_LOAD_OFFSET_16) {
+        bpf_skb_load_bytes(skb, payload_offset + copy_offset, event->data + copy_offset, DATA_LOAD_OFFSET_16);
+        copy_offset += DATA_LOAD_OFFSET_16;
+        copy_remain_bytes -= DATA_LOAD_OFFSET_16;
+    }
+
+    if (copy_remain_bytes >= DATA_LOAD_OFFSET_8) {
+        bpf_skb_load_bytes(skb, payload_offset + copy_offset, event->data + copy_offset, DATA_LOAD_OFFSET_8);
+        copy_offset += DATA_LOAD_OFFSET_8;
+        copy_remain_bytes -= DATA_LOAD_OFFSET_8;
+    }
+    
+    if (copy_remain_bytes >= DATA_LOAD_OFFSET_4) {
+        bpf_skb_load_bytes(skb, payload_offset + copy_offset, event->data + copy_offset, DATA_LOAD_OFFSET_4);
+        copy_offset += DATA_LOAD_OFFSET_4;
+        copy_remain_bytes -= DATA_LOAD_OFFSET_4;
+    }
+
+    if (copy_remain_bytes >= DATA_LOAD_OFFSET_2) {
+        bpf_skb_load_bytes(skb, payload_offset + copy_offset, event->data + copy_offset, DATA_LOAD_OFFSET_2);
+        copy_offset += DATA_LOAD_OFFSET_2;
+        copy_remain_bytes -= DATA_LOAD_OFFSET_2;
+    }
+
+    if (copy_remain_bytes >= DATA_LOAD_OFFSET_1) {
+        bpf_skb_load_bytes(skb, payload_offset + copy_offset, event->data + copy_offset, DATA_LOAD_OFFSET_1);
+        copy_offset += DATA_LOAD_OFFSET_1;
+        copy_remain_bytes -= DATA_LOAD_OFFSET_1;
+    }
+
+    return copy_remain_bytes;
 }
 
 SEC("socket")
@@ -103,7 +188,7 @@ int net_filter(struct __sk_buff *skb) {
     }
 
     // ignore empty payload traffic
-    if (l4_payload_len <= 0)
+    if (l4_payload_len == 0)
     {
         return 0;
     }
@@ -122,23 +207,7 @@ int net_filter(struct __sk_buff *skb) {
     event->dst_port = dst_port;
     event->data_len = l4_payload_len;
 
-    __u16 copy_len = l4_payload_len > MAX_PACK_SIZE ? MAX_PACK_SIZE : l4_payload_len;
-    __u16 max_round = copy_len / DATA_LOAD_OFFSET;
-    
-    __u16 cursor = 0;
-    for (__u8 i = 0, off = 0; i < max_round; i++, off += DATA_LOAD_OFFSET, cursor = off) {
-        if (bpf_skb_load_bytes(skb, payload_offset + off, event->data + off, DATA_LOAD_OFFSET) < 0) {
-            break;
-        }
-    }
-
-    // Workaround for sending complete data (DATA_LOAD_OFFSET == 5)
-    bpf_skb_load_bytes(skb, payload_offset + cursor, event->data + cursor, 1);
-    bpf_skb_load_bytes(skb, payload_offset + cursor + 1, event->data + cursor + 1, 1);
-    bpf_skb_load_bytes(skb, payload_offset + cursor + 2, event->data + cursor + 2, 1);
-    bpf_skb_load_bytes(skb, payload_offset + cursor + 3, event->data + cursor + 3, 1);
-
-    // bpf_skb_load_bytes(skb, payload_offset, event->data, MAX_PACK_SIZE);
+    copy_event_data(skb, event, payload_offset, l4_payload_len);
 
     bpf_ringbuf_submit(event, 0);
 
