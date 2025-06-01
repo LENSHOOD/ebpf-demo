@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"errors"
 	"strings"
 	"time"
 
@@ -13,6 +14,8 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/net/dns/dnsmessage"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/hpack"
 	"golang.org/x/sys/unix"
 )
 
@@ -115,7 +118,9 @@ func fillResourceWithAttributes(attrs *pcommon.Map, event *L4Event) {
 	switch event.Header.Protocol {
 	case unix.IPPROTO_TCP:
 		attrs.PutInt(TrafficType, int64(TCP))
-		tryHttp(data, attrs)
+		if err := tryHttp11(data, attrs); err != nil {
+			_ = tryHttp2(data, attrs)
+		}
 	case unix.IPPROTO_UDP:
 		attrs.PutInt(TrafficType, int64(UDP))
 		if ntohs(event.Header.SrcPort) == 53 || ntohs(event.Header.DstPort) == 53 {
@@ -143,7 +148,7 @@ func getSpanWithRs(traceId pcommon.TraceID, parentSpanId pcommon.SpanID) (ptrace
 	return traces, span, ebpfRs
 }
 
-func tryHttp(data []byte, attrs *pcommon.Map) {
+func tryHttp11(data []byte, attrs *pcommon.Map) error {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 
 	lineNum := 0
@@ -156,7 +161,7 @@ func tryHttp(data []byte, attrs *pcommon.Map) {
 		if lineNum == 0 {
 			parts := strings.Fields(line)
 			if len(parts) < 3 {
-				return
+				return errors.New("parsing failed")
 			}
 
 			firstSegment := parts[0]
@@ -194,6 +199,46 @@ func tryHttp(data []byte, attrs *pcommon.Map) {
 		}
 		lineNum++
 	}
+
+	return nil
+}
+
+func tryHttp2(data []byte, attrs *pcommon.Map) error {
+	fr := http2.NewFramer(nil, bytes.NewReader(data))
+
+	for {
+		frame, err := fr.ReadFrame()
+		if frame == nil {
+			break
+		}
+
+		if err != nil {
+			return err
+		}
+
+		switch f := frame.(type) {
+		case *http2.HeadersFrame:
+			decoder := hpack.NewDecoder(4096, nil)
+			fields, err := decoder.DecodeFull(f.HeaderBlockFragment())
+			if err != nil {
+				return err
+			}
+
+			for _, hf := range fields {
+				if hf.Name == "traceparent" {
+					attrs.PutStr("traceparent", hf.Value)
+				}
+				if hf.Name == "tracestate" {
+					attrs.PutStr("tracestate", hf.Value)
+				}
+			}
+
+		case *http2.DataFrame:
+			// ignore
+		}
+	}
+
+	return nil
 }
 
 func tryDNS(data []byte, attrs *pcommon.Map) {
@@ -223,15 +268,15 @@ func buildTrafficIdentifier(event *L4Event) int64 {
 }
 
 func NewTraceID() pcommon.TraceID {
-    var id [16]byte
-    rand.Read(id[:])
-    return pcommon.TraceID(id)
+	var id [16]byte
+	rand.Read(id[:])
+	return pcommon.TraceID(id)
 }
 
 func NewSpanID() pcommon.SpanID {
-    var id [8]byte
-    rand.Read(id[:])
-    return pcommon.SpanID(id)
+	var id [8]byte
+	rand.Read(id[:])
+	return pcommon.SpanID(id)
 }
 
 func getInt(attr *pcommon.Map, key string) int64 {
