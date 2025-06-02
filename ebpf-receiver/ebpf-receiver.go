@@ -19,12 +19,12 @@ import (
 
 type Header struct {
 	MonoTimestampNs uint64
-	Protocol    uint32
-	SrcIP       uint32
-	DstIP       uint32
-	SrcPort     uint16
-	DstPort     uint16
-	DataLength  uint16
+	Protocol        uint32
+	SrcIP           uint32
+	DstIP           uint32
+	SrcPort         uint16
+	DstPort         uint16
+	DataLength      uint16
 }
 
 type L4Event struct {
@@ -149,13 +149,14 @@ func (rcvr *ebpfReceiver) listen(ctx context.Context) func() {
 						continue
 					}
 
-					Logger().Sugar().Debugf("L4 Packaet: from %s:%d, to %s:%d, protocal: %d, len: %d\n", 
-						u32ToIPv4(ntoh(event.Header.SrcIP)), 
-						ntohs(event.Header.SrcPort), 
-						u32ToIPv4(ntoh(event.Header.DstIP)), 
-						ntohs(event.Header.DstPort), 
-						event.Header.Protocol, 
+					Logger().Sugar().Debugf("L4 Packaet: from %s:%d, to %s:%d, protocal: %d, len: %d\n",
+						u32ToIPv4(ntoh(event.Header.SrcIP)),
+						ntohs(event.Header.SrcPort),
+						u32ToIPv4(ntoh(event.Header.DstIP)),
+						ntohs(event.Header.DstPort),
+						event.Header.Protocol,
 						event.Header.DataLength)
+
 					_ = rcvr.nextConsumer.ConsumeTraces(ctx, rcvr.generateEbpfTraces(&event))
 				}
 			}

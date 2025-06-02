@@ -17,6 +17,8 @@ import (
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/hpack"
 	"golang.org/x/sys/unix"
+
+	"github.com/jackc/pgx/v5/pgproto3"
 )
 
 type Kind int
@@ -238,6 +240,23 @@ func tryHttp2(data []byte, attrs *pcommon.Map) error {
 		}
 	}
 
+	return nil
+}
+
+func tryPgsql(data []byte, attrs *pcommon.Map) error {
+	reader := bytes.NewReader(data)
+    for {
+        msg, err := pgproto3.NewBackend(reader, nil).Receive()
+        if err != nil {
+            break
+        }
+        switch pkt := msg.(type) {
+        case *pgproto3.Query:
+            attrs.PutStr("Query", pkt.String)
+		case *pgproto3.Parse:
+            attrs.PutStr("Query", pkt.Query)
+        }
+    }
 	return nil
 }
 
