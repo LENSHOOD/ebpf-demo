@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"io"
 	"strings"
 	"time"
 
@@ -44,6 +45,8 @@ const (
 	HTTP_RESP
 	DNS_REQ
 	DNS_RESP
+	PGSQL_QUERY
+	PGSQL_RESP
 )
 
 const MetadataTrafficIdentifier = "traffic.identifier"
@@ -121,7 +124,9 @@ func fillResourceWithAttributes(attrs *pcommon.Map, event *L4Event) {
 	case unix.IPPROTO_TCP:
 		attrs.PutInt(TrafficType, int64(TCP))
 		if err := tryHttp11(data, attrs); err != nil {
-			_ = tryHttp2(data, attrs)
+			if err := tryPgsql(data, attrs); err != nil {
+				_ = tryHttp2(data, attrs)
+			}
 		}
 	case unix.IPPROTO_UDP:
 		attrs.PutInt(TrafficType, int64(UDP))
@@ -202,6 +207,10 @@ func tryHttp11(data []byte, attrs *pcommon.Map) error {
 		lineNum++
 	}
 
+	t := getInt(attrs, TrafficType)
+	if t != int64(HTTP_REQ) && t != int64(HTTP_RESP) {
+		return errors.New("invalid http1.1 data")
+	}
 	return nil
 }
 
@@ -245,19 +254,33 @@ func tryHttp2(data []byte, attrs *pcommon.Map) error {
 
 func tryPgsql(data []byte, attrs *pcommon.Map) error {
 	reader := bytes.NewReader(data)
-    for {
+    var e error = nil
+	hasQurey := false
+	for {
         msg, err := pgproto3.NewBackend(reader, nil).Receive()
         if err != nil {
+			if err != io.ErrUnexpectedEOF {
+				e = err
+			}
             break
         }
         switch pkt := msg.(type) {
         case *pgproto3.Query:
+			attrs.PutInt(TrafficType, int64(PGSQL_QUERY))
             attrs.PutStr("Query", pkt.String)
+			hasQurey = true
 		case *pgproto3.Parse:
+			attrs.PutInt(TrafficType, int64(PGSQL_QUERY))
             attrs.PutStr("Query", pkt.Query)
+			hasQurey = true
         }
     }
-	return nil
+
+	if hasQurey {
+		return nil
+	}
+
+	return e
 }
 
 func tryDNS(data []byte, attrs *pcommon.Map) {
