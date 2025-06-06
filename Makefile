@@ -21,19 +21,21 @@ dev-in-container:
 	$(DOCKER) build -t ebpf-demo-builder:latest -f Dockerfile.build .
 	$(DOCKER) run -it --rm -v ./:/build -w /build ebpf-demo-builder:latest /bin/bash
 
+BUILD_CONFIG = builder-config.yaml
 build: build-ebpf build-collector
 build-collector:
-	$(GO_ENV) ./ocb --config builder-config.yaml
+	$(GO_ENV) ./ocb --config $(BUILD_CONFIG)
 build-ebpf: $(BPF_OBJ)
 build-collector-debug: 
-	$(GO_ENV) ./ocb --ldflags="" --gcflags="all=-N -l" --verbose --config builder-config.yaml
+	$(GO_ENV) ./ocb --ldflags="" --gcflags="all=-N -l" --verbose --config $(BUILD_CONFIG)
 
 $(BPF_OBJ): $(BPF_SRC)
 	@echo "Building eBPF program..."
 	$(CLANG) -g -O2 -target bpf -D__TARGET_ARCH_x86 -c $(BPF_SRC) -o $(BPF_OBJ)
 
+CONFIG = config.yaml
 run-local:
-	$(GO) run ./$(GO_DIR) --config config.yaml
+	$(GO) run ./$(GO_DIR) --config $(CONFIG)
 
 build-image:
 	$(DOCKER) build -t $(IMAGE_NAME):$(IMAGE_TAG) .

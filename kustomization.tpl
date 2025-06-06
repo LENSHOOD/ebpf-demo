@@ -15,7 +15,7 @@ images:
 configMapGenerator:
   - name: collector-config
     files:
-      - config.yaml
+      - config.yaml=${CONFIG_FILE}
   - name: ebpf-bin
     files:
       - ebpf-receiver/ebpf/l4_traffic.o
