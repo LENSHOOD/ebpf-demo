@@ -15,8 +15,6 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/net/dns/dnsmessage"
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/hpack"
 	"golang.org/x/sys/unix"
 
 	"github.com/jackc/pgx/v5/pgproto3"
@@ -124,9 +122,10 @@ func fillResourceWithAttributes(attrs *pcommon.Map, event *L4Event) {
 	case unix.IPPROTO_TCP:
 		attrs.PutInt(TrafficType, int64(TCP))
 		if err := tryHttp11(data, attrs); err != nil {
-			if err := tryPgsql(data, attrs); err != nil {
-				_ = tryHttp2(data, attrs)
-			}
+			// if u32ToIPv4(ntoh(event.Header.DstIP)) == "10.42.0.158" {
+			// 	Logger().Sugar().Errorf("------1---------")
+			_ = tryPgsql(data, attrs)
+			// }
 		}
 	case unix.IPPROTO_UDP:
 		attrs.PutInt(TrafficType, int64(UDP))
@@ -214,67 +213,33 @@ func tryHttp11(data []byte, attrs *pcommon.Map) error {
 	return nil
 }
 
-func tryHttp2(data []byte, attrs *pcommon.Map) error {
-	fr := http2.NewFramer(nil, bytes.NewReader(data))
-
-	for {
-		frame, err := fr.ReadFrame()
-		if frame == nil {
-			break
-		}
-
-		if err != nil {
-			return err
-		}
-
-		switch f := frame.(type) {
-		case *http2.HeadersFrame:
-			decoder := hpack.NewDecoder(4096, nil)
-			fields, err := decoder.DecodeFull(f.HeaderBlockFragment())
-			if err != nil {
-				return err
-			}
-
-			for _, hf := range fields {
-				if hf.Name == "traceparent" {
-					attrs.PutStr("traceparent", hf.Value)
-				}
-				if hf.Name == "tracestate" {
-					attrs.PutStr("tracestate", hf.Value)
-				}
-			}
-
-		case *http2.DataFrame:
-			// ignore
-		}
-	}
-
-	return nil
-}
-
 func tryPgsql(data []byte, attrs *pcommon.Map) error {
-	reader := bytes.NewReader(data)
-    var e error = nil
+	b := pgproto3.NewBackend(bytes.NewReader(data), nil)
+	// this is very important beacuse some arbitrary data may happen to match the
+	// pgsql type could lead to the Receive() allocating a very very big buffer on stack
+	b.SetMaxBodyLen(len(data))
+	var e error = nil
 	hasQurey := false
+
 	for {
-        msg, err := pgproto3.NewBackend(reader, nil).Receive()
-        if err != nil {
+		msg, err := b.Receive()
+		if err != nil {
 			if err != io.ErrUnexpectedEOF {
 				e = err
 			}
-            break
-        }
-        switch pkt := msg.(type) {
-        case *pgproto3.Query:
+			break
+		}
+		switch pkt := msg.(type) {
+		case *pgproto3.Query:
 			attrs.PutInt(TrafficType, int64(PGSQL_QUERY))
-            attrs.PutStr("Query", pkt.String)
+			attrs.PutStr("Query", pkt.String)
 			hasQurey = true
 		case *pgproto3.Parse:
 			attrs.PutInt(TrafficType, int64(PGSQL_QUERY))
-            attrs.PutStr("Query", pkt.Query)
+			attrs.PutStr("Query", pkt.Query)
 			hasQurey = true
-        }
-    }
+		}
+	}
 
 	if hasQurey {
 		return nil

@@ -4,7 +4,6 @@ go 1.23.4
 
 require (
 	github.com/cilium/ebpf v0.17.1
-	github.com/google/uuid v1.6.0
 	go.opentelemetry.io/collector/component v1.31.0
 	go.opentelemetry.io/collector/consumer v1.31.0
 	go.opentelemetry.io/collector/pdata v1.31.0
@@ -14,11 +13,7 @@ require (
 	golang.org/x/sys v0.32.0
 )
 
-require (
-	github.com/jackc/pgpassfile v1.0.0 // indirect
-	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
-	golang.org/x/crypto v0.37.0 // indirect
-)
+require github.com/google/uuid v1.6.0 // indirect
 
 require (
 	github.com/go-logr/logr v1.4.2 // indirect
@@ -34,11 +29,11 @@ require (
 	go.opentelemetry.io/collector/internal/telemetry v0.125.0 // indirect
 	go.opentelemetry.io/collector/pipeline v0.125.0 // indirect
 	go.opentelemetry.io/contrib/bridges/otelzap v0.10.0 // indirect
-	go.opentelemetry.io/otel v1.35.0 // indirect
+	go.opentelemetry.io/otel v1.35.0
 	go.opentelemetry.io/otel/log v0.11.0 // indirect
 	go.opentelemetry.io/otel/metric v1.35.0 // indirect
 	go.opentelemetry.io/otel/sdk v1.35.0 // indirect
-	go.opentelemetry.io/otel/trace v1.35.0 // indirect
+	go.opentelemetry.io/otel/trace v1.35.0
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/text v0.24.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250218202821-56aae31c358a // indirect

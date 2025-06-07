@@ -1,21 +1,21 @@
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: otel-ebpf-demo-collector-daemon
+  name: otel-collector
 spec:
   selector:
     matchLabels:
-      app: otel-ebpf-demo
+      app: otel-collector
   template:
     metadata:
       labels:
-        app: otel-ebpf-demo
+        app: otel-collector
     spec:
-      serviceAccountName: otel-ebpf-demo-collector-daemon
+      serviceAccountName: otel-collector
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
       containers:
-      - name: ebpf-demo-collector
+      - name: otel-collector
         image: ebpf-demo-collector-image
         imagePullPolicy: Always
         securityContext:
@@ -50,10 +50,10 @@ spec:
             readOnly: true
         resources:
           limits:
-            memory: "256Mi"
+            memory: "512Mi"
             cpu: "500m"
           requests:
-            memory: "128Mi"
+            memory: "256Mi"
             cpu: "250m"
         ports:
         - containerPort: 4317

@@ -149,6 +149,8 @@ service:
       - jaeger
       - zipkin
   telemetry:
+    logs:
+      level: error
     metrics:
       address: ${env:MY_POD_IP}:8888
       level: detailed
