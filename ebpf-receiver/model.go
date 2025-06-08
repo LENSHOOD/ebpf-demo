@@ -20,16 +20,6 @@ import (
 	"github.com/jackc/pgx/v5/pgproto3"
 )
 
-type Kind int
-
-const (
-	NodeSrc Kind = iota
-	NodeDest
-	Body
-)
-const DirectionKey = "direction"
-const SrcSpanName = "tcp_event_src"
-const DestSpanName = "tcp_event_dest"
 const BodySpanName = "tcp_event_body"
 const TrafficType = "traffic.type"
 const ServiceName = "service.name"

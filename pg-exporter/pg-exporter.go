@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+
 	"github.com/jackc/pgx/v4/pgxpool"
 	ebpfreceiver "github.com/open-telemetry/otelcol-ebpf-demo/epbf-receiver"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	"go.uber.org/zap"
-	"os"
-	"strconv"
 )
 
 type postgresExporter struct {
@@ -65,36 +65,33 @@ func getStrFromRs(rs pcommon.Resource, key string) string {
 func (e *postgresExporter) insertGraph(ctx context.Context, rss ptrace.ResourceSpansSlice) error {
 	for i := 0; i < rss.Len(); i++ {
 		rs := rss.At(i).Resource()
-		kind := ebpfreceiver.Kind(getIntFromRs(rs, ebpfreceiver.DirectionKey))
-		switch kind {
-		case ebpfreceiver.NodeSrc:
-			fallthrough
-		case ebpfreceiver.NodeDest:
-			ip := getStrFromRs(rs, ebpfreceiver.MetadataIp)
-			ns := getStrFromRs(rs, ebpfreceiver.MetadataNS)
-			deployName := getStrFromRs(rs, ebpfreceiver.MetadataDeployName)
-			nodeName := getStrFromRs(rs, ebpfreceiver.MetadataNodeName)
-			podName := getStrFromRs(rs, ebpfreceiver.MetadataPodName)
+		srcIp := getStrFromRs(rs, ebpfreceiver.MetadataSrc)
+		destIp := getStrFromRs(rs, ebpfreceiver.MetadataDest)
+		ns := getStrFromRs(rs, ebpfreceiver.MetadataNS)
+		deployName := getStrFromRs(rs, ebpfreceiver.MetadataDeployName)
+		nodeName := getStrFromRs(rs, ebpfreceiver.MetadataNodeName)
+		podName := getStrFromRs(rs, ebpfreceiver.MetadataPodName)
 
-			e.logger.Sugar().Debugf("Insert Node: %s", ip)
-			if err := e.upsertNode(ctx, ip, ns, deployName, nodeName, podName); err != nil {
-				return fmt.Errorf("failed to upsert into nodes: %w", err)
-			}
-		case ebpfreceiver.Body:
-			srcIp := getStrFromRs(rs, ebpfreceiver.MetadataSrc)
-			destIp := getStrFromRs(rs, ebpfreceiver.MetadataDest)
-			e.logger.Sugar().Debugf("Insert Edge: %s - %s", srcIp, destIp)
-			if err := e.upsertEdge(ctx, srcIp, destIp); err != nil {
-				return fmt.Errorf("failed to upsert edge into edges: %w", err)
-			}
+		e.logger.Sugar().Debugf("Insert Nodes: %s, %s", srcIp, destIp)
+		if err := e.upsertNode(ctx, srcIp, ns, deployName, nodeName, podName); err != nil {
+			return fmt.Errorf("failed to upsert into nodes: %w", err)
+		}
 
-			srcPort := getIntFromRs(rs, ebpfreceiver.MetadataSrcPort)
-			destPort := getIntFromRs(rs, ebpfreceiver.MetadataDestPort)
+		if err := e.upsertNode(ctx, destIp, ns, deployName, nodeName, podName); err != nil {
+			return fmt.Errorf("failed to upsert into nodes: %w", err)
+		}
 
-			e.logger.Sugar().Debugf("Insert Net Traces: %s:%d - %s:%d", srcIp, srcPort, destIp, destPort)
-			if err := e.upsertBody(ctx, rs, srcIp, srcPort, destIp, destPort); err != nil {
-				return fmt.Errorf("failed to upsert body into net_traces: %w", err)
-			}
+		e.logger.Sugar().Debugf("Insert Edge: %s - %s", srcIp, destIp)
+		if err := e.upsertEdge(ctx, srcIp, destIp); err != nil {
+			return fmt.Errorf("failed to upsert edge into edges: %w", err)
+		}
+
+		srcPort := getIntFromRs(rs, ebpfreceiver.MetadataSrcPort)
+		destPort := getIntFromRs(rs, ebpfreceiver.MetadataDestPort)
+
+		e.logger.Sugar().Debugf("Insert Net Traces: %s:%d - %s:%d", srcIp, srcPort, destIp, destPort)
+		if err := e.upsertBody(ctx, rs, srcIp, srcPort, destIp, destPort); err != nil {
+			return fmt.Errorf("failed to upsert body into net_traces: %w", err)
 		}
 	}
 
@@ -195,15 +192,11 @@ type HttpStruct struct {
 	Status      string `json:"status"`
 	ReqContent  string `json:"req_content"`
 	RespContent string `json:"resp_content"`
-	Start       string `json:"start"`
-	End         string `json:"end"`
 }
 
 type DnsStruct struct {
 	ReqContent  string `json:"req_content"`
 	RespContent string `json:"resp_content"`
-	Start       string `json:"start"`
-	End         string `json:"end"`
 }
 
 func (e *postgresExporter) buildPayload(tt ebpfreceiver.TT, rs pcommon.Resource, existingPayload []byte) ([]byte, error) {
@@ -216,7 +209,6 @@ func (e *postgresExporter) buildPayload(tt ebpfreceiver.TT, rs pcommon.Resource,
 				return nil, fmt.Errorf("unmarshal error: %v", err)
 			}
 		}
-		http.Start = strconv.FormatInt(getIntFromRs(rs, ebpfreceiver.Timestamp), 10)
 		http.Uri = getStrFromRs(rs, ebpfreceiver.HttpUri)
 		http.Method = getStrFromRs(rs, ebpfreceiver.HttpMethod)
 		http.Version = getStrFromRs(rs, ebpfreceiver.HttpVersion)
@@ -231,7 +223,6 @@ func (e *postgresExporter) buildPayload(tt ebpfreceiver.TT, rs pcommon.Resource,
 				return nil, fmt.Errorf("unmarshal error: %v", err)
 			}
 		}
-		http.End = strconv.FormatInt(getIntFromRs(rs, ebpfreceiver.Timestamp), 10)
 		http.Status = getStrFromRs(rs, ebpfreceiver.HttpStatus)
 		http.RespContent = getStrFromRs(rs, ebpfreceiver.BodyContent)
 		return json.Marshal(http)
@@ -243,7 +234,6 @@ func (e *postgresExporter) buildPayload(tt ebpfreceiver.TT, rs pcommon.Resource,
 				return nil, fmt.Errorf("unmarshal error: %v", err)
 			}
 		}
-		dns.Start = strconv.FormatInt(getIntFromRs(rs, ebpfreceiver.Timestamp), 10)
 		dns.ReqContent = getStrFromRs(rs, ebpfreceiver.BodyContent)
 		return json.Marshal(dns)
 	case ebpfreceiver.DNS_RESP:
@@ -253,7 +243,6 @@ func (e *postgresExporter) buildPayload(tt ebpfreceiver.TT, rs pcommon.Resource,
 				return nil, fmt.Errorf("unmarshal error: %v", err)
 			}
 		}
-		dns.End = strconv.FormatInt(getIntFromRs(rs, ebpfreceiver.Timestamp), 10)
 		dns.RespContent = getStrFromRs(rs, ebpfreceiver.BodyContent)
 		return json.Marshal(dns)
 	default:
