@@ -13,6 +13,16 @@ BPF_DIR = ebpf-receiver/ebpf
 BPF_SRC = $(BPF_DIR)/l4_traffic.bpf.c
 BPF_OBJ = $(BPF_DIR)/l4_traffic.o
 
+ARCH := $(shell uname -m)
+
+ifeq ($(ARCH),x86_64)
+	OCB := ./ocb-linux-amd64
+else ifeq ($(ARCH),aarch64)
+	OCB := ./ocb-linux-arm64
+else
+	$(error ❌ Unsupported architecture: $(ARCH))
+endif
+
 build-in-container: 
 	$(DOCKER) build -t ebpf-demo-builder:latest -f Dockerfile.build .
 	$(DOCKER) run --rm -v ./:/build -w /build ebpf-demo-builder:latest make build
@@ -24,10 +34,10 @@ dev-in-container:
 BUILD_CONFIG = builder-config.yaml
 build: build-ebpf build-collector
 build-collector:
-	$(GO_ENV) ./ocb --config $(BUILD_CONFIG)
+	$(GO_ENV) ${OCB} --config $(BUILD_CONFIG)
 build-ebpf: $(BPF_OBJ)
 build-collector-debug: 
-	$(GO_ENV) ./ocb --ldflags="" --gcflags="all=-N -l" --verbose --config $(BUILD_CONFIG)
+	$(GO_ENV) ${OCB} --ldflags="" --gcflags="all=-N -l" --verbose --config $(BUILD_CONFIG)
 
 $(BPF_OBJ): $(BPF_SRC)
 	@echo "Building eBPF program..."
