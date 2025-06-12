@@ -112,10 +112,7 @@ func fillResourceWithAttributes(attrs *pcommon.Map, event *L4Event) {
 	case unix.IPPROTO_TCP:
 		attrs.PutInt(TrafficType, int64(TCP))
 		if err := tryHttp11(data, attrs); err != nil {
-			// if u32ToIPv4(ntoh(event.Header.DstIP)) == "10.42.0.158" {
-			// 	Logger().Sugar().Errorf("------1---------")
 			_ = tryPgsql(data, attrs)
-			// }
 		}
 	case unix.IPPROTO_UDP:
 		attrs.PutInt(TrafficType, int64(UDP))
