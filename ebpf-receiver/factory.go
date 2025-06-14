@@ -11,9 +11,9 @@ import (
 )
 
 var (
-	typeStr = component.MustNewType("ebpf_receiver")
+	typeStr    = component.MustNewType("ebpf_receiver")
 	logger     *zap.Logger
-    loggerOnce sync.Once
+	loggerOnce sync.Once
 )
 
 func createDefaultConfig() component.Config {
@@ -29,7 +29,9 @@ func createTracesReceiver(_ context.Context, params receiver.Settings, baseCfg c
 	traceRcvr := &ebpfReceiver{
 		nextConsumer: consumer,
 		config:       cfg,
-		objs:         &BPFObjects{},
+		esf: &EbpfSocketFilter{
+			objs: &EsfObjects{},
+		},
 	}
 
 	return traceRcvr, nil
@@ -44,8 +46,8 @@ func NewFactory() receiver.Factory {
 }
 
 func Logger() *zap.Logger {
-    if logger == nil {
-        panic("Logger used before initialization!")
-    }
-    return logger
+	if logger == nil {
+		panic("Logger used before initialization!")
+	}
+	return logger
 }

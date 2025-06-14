@@ -10,15 +10,17 @@ GO_DIR = otelcol-ebpf-demo
 
 CLANG = clang
 BPF_DIR = ebpf-receiver/ebpf
-BPF_SRC = $(BPF_DIR)/l4_traffic.bpf.c
-BPF_OBJ = $(BPF_DIR)/l4_traffic.o
+BPF_SRC = $(BPF_DIR)/l4_traffic.bpf.c $(BPF_DIR)/quad_tuple_pid.bpf.c
+BPF_OBJ = $(BPF_SRC:.bpf.c=.o)
 
 ARCH := $(shell uname -m)
 
 ifeq ($(ARCH),x86_64)
 	OCB := ./ocb-linux-amd64
+	EBPF_TARGET := -D__TARGET_ARCH_x86
 else ifeq ($(ARCH),aarch64)
 	OCB := ./ocb-linux-arm64
+	EBPF_TARGET := -D__TARGET_ARCH_arm64
 else
 	$(error ❌ Unsupported architecture: $(ARCH))
 endif
@@ -39,9 +41,9 @@ build-ebpf: $(BPF_OBJ)
 build-collector-debug: 
 	$(GO_ENV) ${OCB} --ldflags="" --gcflags="all=-N -l" --verbose --config $(BUILD_CONFIG)
 
-$(BPF_OBJ): $(BPF_SRC)
-	@echo "Building eBPF program..."
-	$(CLANG) -g -O2 -target bpf -D__TARGET_ARCH_x86 -c $(BPF_SRC) -o $(BPF_OBJ)
+$(BPF_DIR)/%.o: $(BPF_DIR)/%.bpf.c
+	@echo "Building eBPF program: $< → $@ ..."
+	$(CLANG) -g -O2 -target bpf ${EBPF_TARGET} -c $< -o $@
 
 CONFIG = config.yaml
 run-local:

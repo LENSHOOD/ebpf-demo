@@ -22,11 +22,11 @@ struct qtp_event_t {
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
     __uint(max_entries, 1 << 24);
-} qtp_events SEC(".maps");
+} qtp_events_rb SEC(".maps");
 
 static __always_inline void submit_ipv4_event(struct sock *sk, __u8 proto) {
     struct qtp_event_t *event;
-    event = bpf_ringbuf_reserve(&qtp_events, sizeof(*event), 0);
+    event = bpf_ringbuf_reserve(&qtp_events_rb, sizeof(*event), 0);
     if (!event)
         return;
 
@@ -37,7 +37,6 @@ static __always_inline void submit_ipv4_event(struct sock *sk, __u8 proto) {
 
     bpf_core_read(&event->sport, sizeof(event->sport), &sk->__sk_common.skc_num);
     bpf_core_read(&event->dport, sizeof(event->dport), &sk->__sk_common.skc_dport);
-    event->dport = __bpf_ntohs(event->dport);
 
     bpf_core_read(&event->saddr, sizeof(event->saddr), &sk->__sk_common.skc_rcv_saddr);
     bpf_core_read(&event->daddr, sizeof(event->daddr), &sk->__sk_common.skc_daddr);
@@ -45,14 +44,14 @@ static __always_inline void submit_ipv4_event(struct sock *sk, __u8 proto) {
     bpf_ringbuf_submit(event, 0);
 }
 
-SEC("kprobe/tcp_v4_connect")
-int BPF_KPROBE(tcp_connect, struct sock *sk) {
+SEC("kprobe/tcp_connect")
+int BPF_KPROBE(handle_tcp_connect, struct sock *sk) {
     submit_ipv4_event(sk, IPPROTO_TCP);
     return 0;
 }
 
 SEC("kprobe/udp_sendmsg")
-int BPF_KPROBE(udp_sendmsg, struct sock *sk) {
+int BPF_KPROBE(handle_udp_sendmsg, struct sock *sk) {
     submit_ipv4_event(sk, IPPROTO_UDP);
     return 0;
 }

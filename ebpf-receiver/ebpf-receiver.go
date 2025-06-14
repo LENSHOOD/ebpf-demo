@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
 	"go.opentelemetry.io/collector/component"
@@ -32,9 +33,39 @@ type L4Event struct {
 	Data   [1024]byte
 }
 
-type BPFObjects struct {
+type EsfObjects struct {
 	Rb   *ebpf.Map     `ebpf:"l4_events_rb"`
 	Prog *ebpf.Program `ebpf:"net_filter"`
+}
+
+type EbpfSocketFilter struct {
+	objs        *EsfObjects
+	sockFd      int
+	eventReader *ringbuf.Reader
+	mreq        unix.PacketMreq
+}
+
+type PidEvent struct {
+	Pid      uint32
+	Protocol uint8
+	Family   uint8
+	SrcIP    uint32
+	DstIP    uint32
+	SrcPort  uint16
+	DstPort  uint16
+}
+
+type EqtpObjects struct {
+	rb  *ebpf.Map     `ebpf:"qtp_events_rb"`
+	tcp *ebpf.Program `ebpf:"handle_tcp_connect"`
+	udp *ebpf.Program `ebpf:"handle_udp_sendmsg"`
+}
+
+type EbpfQuadTuplePid struct {
+	objs        *EqtpObjects
+	tcp_kp      link.Link
+	udp_kp      link.Link
+	eventReader *ringbuf.Reader
 }
 
 type ebpfReceiver struct {
@@ -42,10 +73,8 @@ type ebpfReceiver struct {
 	cancel       context.CancelFunc
 	nextConsumer consumer.Traces
 	config       *EbpfRcvrConfig
-	objs         *BPFObjects
-	sockFd       int
-	eventReader  *ringbuf.Reader
-	mreq         unix.PacketMreq
+	esf          *EbpfSocketFilter
+	eqtp         *EbpfQuadTuplePid
 }
 
 func (rcvr *ebpfReceiver) Start(ctx context.Context, host component.Host) error {
@@ -53,34 +82,46 @@ func (rcvr *ebpfReceiver) Start(ctx context.Context, host component.Host) error 
 	ctx = context.Background()
 	ctx, rcvr.cancel = context.WithCancel(ctx)
 
-	rcvr.loadEbpfProgram(rcvr.config.EbpfBinPath, rcvr.config.NicName)
+	rcvr.loadQuadTuplePid(rcvr.config.EbpfBinPath)
+	rcvr.loadSocketFilter(rcvr.config.EbpfBinPath, rcvr.config.NicName)
 
 	Logger().Sugar().Info("Listening for L4 traffic...")
 
-	go rcvr.listen(ctx)()
+	go rcvr.listenTraffic(ctx)()
 
 	return nil
 }
 
-func (rcvr *ebpfReceiver) loadEbpfProgram(binPath string, nicName string) {
-	if err := rlimit.RemoveMemlock(); err != nil {
-		Logger().Sugar().Fatal(err)
-	}
+func (rcvr *ebpfReceiver) loadQuadTuplePid(binPath string) {
+	loadEbpf(binPath, rcvr.eqtp.objs)
 
-	spec, err := ebpf.LoadCollectionSpec(binPath)
+	tcp_kp, err := link.Kprobe("tcp_connect", rcvr.eqtp.objs.tcp, nil)
 	if err != nil {
-		Logger().Sugar().Fatalf("Failed to load eBPF object: %v", err)
+		Logger().Sugar().Fatalf("Failed to tcp handler: %v", err)
 	}
+	rcvr.eqtp.tcp_kp = tcp_kp
 
-	if err := spec.LoadAndAssign(rcvr.objs, nil); err != nil {
-		Logger().Sugar().Fatalf("Failed to load eBPF objects: %v", err)
+	udp_kp, err := link.Kprobe("udp_sendmsg", rcvr.eqtp.objs.udp, nil)
+	if err != nil {
+		Logger().Sugar().Fatalf("Failed to udp handler: %v", err)
 	}
+	rcvr.eqtp.udp_kp = udp_kp
+
+	reader, err := ringbuf.NewReader(rcvr.eqtp.objs.rb)
+	if err != nil {
+		Logger().Sugar().Fatalf("Failed to create event reader: %v", err)
+	}
+	rcvr.eqtp.eventReader = reader
+}
+
+func (rcvr *ebpfReceiver) loadSocketFilter(binPath string, nicName string) {
+	loadEbpf(binPath, rcvr.esf.objs)
 
 	sock, err := syscall.Socket(syscall.AF_PACKET, syscall.SOCK_RAW, int(htons(syscall.ETH_P_ALL)))
 	if err != nil {
 		Logger().Sugar().Fatalf("Failed to create raw socket: %v", err)
 	}
-	rcvr.sockFd = sock
+	rcvr.esf.sockFd = sock
 
 	iface, err := net.InterfaceByName(nicName)
 	if err != nil {
@@ -93,27 +134,27 @@ func (rcvr *ebpfReceiver) loadEbpfProgram(binPath string, nicName string) {
 	}
 
 	if rcvr.config.PromiscMode {
-		rcvr.mreq = unix.PacketMreq{
+		rcvr.esf.mreq = unix.PacketMreq{
 			Ifindex: int32(iface.Index),
 			Type:    unix.PACKET_MR_PROMISC,
 		}
-		if err := unix.SetsockoptPacketMreq(sock, unix.SOL_PACKET, unix.PACKET_ADD_MEMBERSHIP, &rcvr.mreq); err != nil {
+		if err := unix.SetsockoptPacketMreq(sock, unix.SOL_PACKET, unix.PACKET_ADD_MEMBERSHIP, &rcvr.esf.mreq); err != nil {
 			Logger().Sugar().Fatalf("Failed to set promisc: %v", err)
 		}
 	}
 
-	if err := syscall.SetsockoptInt(sock, syscall.SOL_SOCKET, unix.SO_ATTACH_BPF, rcvr.objs.Prog.FD()); err != nil {
+	if err := syscall.SetsockoptInt(sock, syscall.SOL_SOCKET, unix.SO_ATTACH_BPF, rcvr.esf.objs.Prog.FD()); err != nil {
 		Logger().Sugar().Fatalf("Failed to attach BPF program to socket: %v", err)
 	}
 
-	reader, err := ringbuf.NewReader(rcvr.objs.Rb)
+	reader, err := ringbuf.NewReader(rcvr.esf.objs.Rb)
 	if err != nil {
-		Logger().Sugar().Fatalf("Failed to create perf event reader: %v", err)
+		Logger().Sugar().Fatalf("Failed to create event reader: %v", err)
 	}
-	rcvr.eventReader = reader
+	rcvr.esf.eventReader = reader
 }
 
-func (rcvr *ebpfReceiver) listen(ctx context.Context) func() {
+func (rcvr *ebpfReceiver) listenPid(ctx context.Context) func() {
 	return func() {
 		for {
 			select {
@@ -121,7 +162,37 @@ func (rcvr *ebpfReceiver) listen(ctx context.Context) func() {
 				return
 			default:
 				{
-					record, err := rcvr.eventReader.Read()
+					record, err := rcvr.eqtp.eventReader.Read()
+					if err != nil {
+						Logger().Sugar().Errorf("Error reading from perf buffer: %v", err)
+						continue
+					}
+
+					var event PidEvent
+					buf := bytes.NewBuffer(record.RawSample)
+					if err := binary.Read(buf, HostOrder, &event); err != nil {
+						if err != io.EOF {
+							Logger().Sugar().Errorf("Failed to parse event header: %v", err)
+						}
+						continue
+					}
+					
+					// build map
+				}
+			}
+		}
+	}
+}
+
+func (rcvr *ebpfReceiver) listenTraffic(ctx context.Context) func() {
+	return func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				{
+					record, err := rcvr.esf.eventReader.Read()
 					if err != nil {
 						Logger().Sugar().Errorf("Error reading from perf buffer: %v", err)
 						continue
@@ -164,6 +235,21 @@ func (rcvr *ebpfReceiver) listen(ctx context.Context) func() {
 	}
 }
 
+func loadEbpf(binPath string, objs any) {
+	if err := rlimit.RemoveMemlock(); err != nil {
+		Logger().Sugar().Fatal(err)
+	}
+
+	spec, err := ebpf.LoadCollectionSpec(binPath)
+	if err != nil {
+		Logger().Sugar().Fatalf("Failed to load eBPF object: %v", err)
+	}
+
+	if err := spec.LoadAndAssign(objs, nil); err != nil {
+		Logger().Sugar().Fatalf("Failed to load eBPF objects: %v", err)
+	}
+}
+
 func allows(filter string, event L4Event) bool {
 	if filter == "" {
 		return true
@@ -180,21 +266,21 @@ func (rcvr *ebpfReceiver) Shutdown(ctx context.Context) error {
 	}
 
 	Logger().Sugar().Info("Exiting...")
-	_ = rcvr.eventReader.Close()
-	if err := unix.SetsockoptInt(rcvr.sockFd, unix.SOL_SOCKET, unix.SO_DETACH_BPF, 0); err != nil {
+	_ = rcvr.esf.eventReader.Close()
+	if err := unix.SetsockoptInt(rcvr.esf.sockFd, unix.SOL_SOCKET, unix.SO_DETACH_BPF, 0); err != nil {
 		Logger().Sugar().Fatalf("Failed to detach BPF program: %v", err)
 	}
 
 	if rcvr.config.PromiscMode {
-		if err := unix.SetsockoptPacketMreq(rcvr.sockFd, unix.SOL_PACKET, unix.PACKET_DROP_MEMBERSHIP, &rcvr.mreq); err != nil {
+		if err := unix.SetsockoptPacketMreq(rcvr.esf.sockFd, unix.SOL_PACKET, unix.PACKET_DROP_MEMBERSHIP, &rcvr.esf.mreq); err != nil {
 			Logger().Sugar().Fatalf("Failed to set promisc: %v", err)
 		}
 	}
 
-	_ = syscall.Close(rcvr.sockFd)
+	_ = syscall.Close(rcvr.esf.sockFd)
 	Logger().Sugar().Info("Detached eBPF program.")
-	_ = rcvr.objs.Rb.Close()
-	_ = rcvr.objs.Prog.Close()
+	_ = rcvr.esf.objs.Rb.Close()
+	_ = rcvr.esf.objs.Prog.Close()
 	Logger().Sugar().Info("Exited")
 
 	return nil
