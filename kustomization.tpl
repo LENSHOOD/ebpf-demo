@@ -16,9 +16,12 @@ configMapGenerator:
   - name: collector-config
     files:
       - config.yaml=${CONFIG_FILE}
-  - name: ebpf-bin
+  - name: ebpf-bin-traffic
     files:
       - ebpf-receiver/ebpf/l4_traffic.o
+  - name: ebpf-bin-pid
+    files:
+      - ebpf-receiver/ebpf/quad_tuple_pid.o
   - name: db-init
     files:
       - pg-exporter/db_init/init.sql

@@ -36,5 +36,9 @@ spec:
       port: 9411
       targetPort: 9411
       protocol: TCP
+    - name: debug
+      port: 4000
+      targetPort: 4000
+      protocol: TCP
   type: ClusterIP
   

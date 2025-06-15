@@ -44,6 +44,7 @@ build-collector-debug:
 $(BPF_DIR)/%.o: $(BPF_DIR)/%.bpf.c
 	@echo "Building eBPF program: $< → $@ ..."
 	$(CLANG) -g -O2 -target bpf ${EBPF_TARGET} -c $< -o $@
+	llvm-strip --strip-debug $@
 
 CONFIG = config.yaml
 run-local:

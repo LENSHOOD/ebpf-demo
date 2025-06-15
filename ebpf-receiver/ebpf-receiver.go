@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"regexp"
+	"sync"
 	"syscall"
 
 	"github.com/cilium/ebpf"
@@ -18,14 +19,18 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+type QuadTuple struct {
+	SrcIP   uint32
+	DstIP   uint32
+	SrcPort uint16
+	DstPort uint16
+}
+
 type Header struct {
 	MonoTimestampNs uint64
 	Protocol        uint32
-	SrcIP           uint32
-	DstIP           uint32
-	SrcPort         uint16
-	DstPort         uint16
-	DataLength      uint16
+	QuadTuple
+	DataLength uint16
 }
 
 type L4Event struct {
@@ -49,16 +54,13 @@ type PidEvent struct {
 	Pid      uint32
 	Protocol uint8
 	Family   uint8
-	SrcIP    uint32
-	DstIP    uint32
-	SrcPort  uint16
-	DstPort  uint16
+	QuadTuple
 }
 
 type EqtpObjects struct {
-	rb  *ebpf.Map     `ebpf:"qtp_events_rb"`
-	tcp *ebpf.Program `ebpf:"handle_tcp_connect"`
-	udp *ebpf.Program `ebpf:"handle_udp_sendmsg"`
+	RB  *ebpf.Map     `ebpf:"qtp_events_rb"`
+	Tcp *ebpf.Program `ebpf:"handle_tcp_connect"`
+	Udp *ebpf.Program `ebpf:"handle_udp_sendmsg"`
 }
 
 type EbpfQuadTuplePid struct {
@@ -66,6 +68,7 @@ type EbpfQuadTuplePid struct {
 	tcp_kp      link.Link
 	udp_kp      link.Link
 	eventReader *ringbuf.Reader
+	pidMap      sync.Map
 }
 
 type ebpfReceiver struct {
@@ -79,14 +82,14 @@ type ebpfReceiver struct {
 
 func (rcvr *ebpfReceiver) Start(ctx context.Context, host component.Host) error {
 	rcvr.host = host
-	ctx = context.Background()
 	ctx, rcvr.cancel = context.WithCancel(ctx)
 
-	rcvr.loadQuadTuplePid(rcvr.config.EbpfBinPath)
-	rcvr.loadSocketFilter(rcvr.config.EbpfBinPath, rcvr.config.NicName)
+	rcvr.loadQuadTuplePid(rcvr.config.EbpfPidBinPath)
+	rcvr.loadSocketFilter(rcvr.config.EbpfTrafficBinPath, rcvr.config.NicName)
 
 	Logger().Sugar().Info("Listening for L4 traffic...")
 
+	go rcvr.listenPid(ctx)()
 	go rcvr.listenTraffic(ctx)()
 
 	return nil
@@ -95,19 +98,19 @@ func (rcvr *ebpfReceiver) Start(ctx context.Context, host component.Host) error 
 func (rcvr *ebpfReceiver) loadQuadTuplePid(binPath string) {
 	loadEbpf(binPath, rcvr.eqtp.objs)
 
-	tcp_kp, err := link.Kprobe("tcp_connect", rcvr.eqtp.objs.tcp, nil)
+	tcp_kp, err := link.Kprobe("tcp_connect", rcvr.eqtp.objs.Tcp, nil)
 	if err != nil {
 		Logger().Sugar().Fatalf("Failed to tcp handler: %v", err)
 	}
 	rcvr.eqtp.tcp_kp = tcp_kp
 
-	udp_kp, err := link.Kprobe("udp_sendmsg", rcvr.eqtp.objs.udp, nil)
+	udp_kp, err := link.Kprobe("udp_sendmsg", rcvr.eqtp.objs.Udp, nil)
 	if err != nil {
 		Logger().Sugar().Fatalf("Failed to udp handler: %v", err)
 	}
 	rcvr.eqtp.udp_kp = udp_kp
 
-	reader, err := ringbuf.NewReader(rcvr.eqtp.objs.rb)
+	reader, err := ringbuf.NewReader(rcvr.eqtp.objs.RB)
 	if err != nil {
 		Logger().Sugar().Fatalf("Failed to create event reader: %v", err)
 	}
@@ -176,8 +179,8 @@ func (rcvr *ebpfReceiver) listenPid(ctx context.Context) func() {
 						}
 						continue
 					}
-					
-					// build map
+
+					rcvr.eqtp.pidMap.Store(event.QuadTuple, ntoh(event.Pid))
 				}
 			}
 		}

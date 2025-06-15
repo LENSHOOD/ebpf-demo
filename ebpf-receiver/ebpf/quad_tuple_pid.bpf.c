@@ -13,22 +13,23 @@ struct qtp_event_t {
     __u32 pid;
     __u8 protocol; // 6 = TCP, 17 = UDP
     __u8 family;   // AF_INET or AF_INET6
-    __u16 sport;
-    __u16 dport;
     __u32 saddr;
     __u32 daddr;
+    __u16 sport;
+    __u16 dport;
 };
 
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 1 << 24);
+    __uint(max_entries, 256 * 1024);
 } qtp_events_rb SEC(".maps");
 
 static __always_inline void submit_ipv4_event(struct sock *sk, __u8 proto) {
     struct qtp_event_t *event;
     event = bpf_ringbuf_reserve(&qtp_events_rb, sizeof(*event), 0);
-    if (!event)
+    if (!event) {
         return;
+    }
 
     __u32 pid = bpf_get_current_pid_tgid() >> 32;
     event->pid = pid;

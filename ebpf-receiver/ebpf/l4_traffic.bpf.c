@@ -31,7 +31,7 @@ struct l4_event_t {
 } __attribute__((packed));
 
 struct {
-    	__uint(type, BPF_MAP_TYPE_RINGBUF);
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
 	__uint(max_entries, 256 * 1024);
 } l4_events_rb SEC(".maps");
 

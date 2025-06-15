@@ -32,6 +32,9 @@ func createTracesReceiver(_ context.Context, params receiver.Settings, baseCfg c
 		esf: &EbpfSocketFilter{
 			objs: &EsfObjects{},
 		},
+		eqtp: &EbpfQuadTuplePid{
+			objs: &EqtpObjects{},
+		},
 	}
 
 	return traceRcvr, nil

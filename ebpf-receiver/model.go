@@ -47,6 +47,7 @@ const MetadataNS = "k8s.namespace.name"
 const MetadataDeployName = "k8s.deployment.name"
 const MetadataNodeName = "k8s.node.name"
 const MetadataPodName = "k8s.pod.name"
+const MetaPid = "pid"
 
 const HttpMethod = "Method"
 const HttpUri = "URI"
@@ -58,8 +59,13 @@ const OtelTraceParent = "traceparent"
 const OtelTraceState = "tracestate"
 
 func (rcvr *ebpfReceiver) generateEbpfTraces(l4Event *L4Event) ptrace.Traces {
+	var pid uint32
+	if p, ok := rcvr.eqtp.pidMap.Load(l4Event.Header.QuadTuple); ok {
+		p, _ := p.(uint32)
+		pid = p
+	}
 	bodyAttributes := pcommon.NewMap()
-	fillResourceWithAttributes(&bodyAttributes, l4Event)
+	fillResourceWithAttributes(&bodyAttributes, l4Event, pid)
 
 	trafficType := getInt(&bodyAttributes, TrafficType)
 	traceParent, traceState := "", ""
@@ -94,7 +100,7 @@ func (rcvr *ebpfReceiver) generateEbpfTraces(l4Event *L4Event) ptrace.Traces {
 	return trace
 }
 
-func fillResourceWithAttributes(attrs *pcommon.Map, event *L4Event) {
+func fillResourceWithAttributes(attrs *pcommon.Map, event *L4Event, pid uint32) {
 	endOfData := int(event.Header.DataLength)
 	if endOfData > len(event.Data) {
 		endOfData = len(event.Data)
@@ -107,6 +113,7 @@ func fillResourceWithAttributes(attrs *pcommon.Map, event *L4Event) {
 	attrs.PutStr(MetadataDest, u32ToIPv4(ntoh(event.Header.DstIP)))
 	attrs.PutInt(MetadataSrcPort, int64(ntohs(event.Header.SrcPort)))
 	attrs.PutInt(MetadataDestPort, int64(ntohs(event.Header.DstPort)))
+	attrs.PutInt(MetaPid, int64(pid))
 
 	switch event.Header.Protocol {
 	case unix.IPPROTO_TCP:
