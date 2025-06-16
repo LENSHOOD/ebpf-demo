@@ -44,6 +44,14 @@ static inline int ip_is_fragment(struct __sk_buff *skb, __u32 nhoff)
 	return frag_off & (IP_MF | IP_OFFSET);
 }
 
+static __inline __u64 bpf_htonll(__u64 x) {
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    return __builtin_bswap64(x);
+#else
+    return x;
+#endif
+}
+
 int copy_event_data(struct __sk_buff *skb, struct l4_event_t *event, __u16 payload_offset, __u16 l4_payload_len) {
     if (skb == 0 || event == 0) {
         return -1;
@@ -178,7 +186,7 @@ int net_filter(struct __sk_buff *skb) {
             dst_port = udp.dest;
 
             __u8 udphdr_len = sizeof(udp);
-            __u16 l4_payload_len = ip_pkt_tlen - iphdr_len - udphdr_len;
+            l4_payload_len = ip_pkt_tlen - iphdr_len - udphdr_len;
             payload_offset = l4_offset + udphdr_len;
             break;
         }
@@ -199,13 +207,13 @@ int net_filter(struct __sk_buff *skb) {
 		return 0;
 	}
 
-    event->mono_timestamp_ns = bpf_ktime_get_ns();
-    event->protocol = ip.protocol;
+    event->mono_timestamp_ns = bpf_htonll(bpf_ktime_get_ns());
+    event->protocol = __bpf_htonl(ip.protocol);
     event->src_ip = ip.saddr;
     event->dst_ip = ip.daddr;
     event->src_port = src_port;
     event->dst_port = dst_port;
-    event->data_len = l4_payload_len;
+    event->data_len = __bpf_htons(l4_payload_len);
 
     copy_event_data(skb, event, payload_offset, l4_payload_len);
 

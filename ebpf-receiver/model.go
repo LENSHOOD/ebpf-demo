@@ -109,10 +109,10 @@ func fillResourceWithAttributes(attrs *pcommon.Map, event *L4Event, pid uint32) 
 	attrs.PutStr(ServiceName, "ebpf-receiver")
 	attrs.PutStr(BodyContent, string(data))
 	attrs.PutInt(MetadataTrafficIdentifier, buildTrafficIdentifier(event))
-	attrs.PutStr(MetadataSrc, u32ToIPv4(ntoh(event.Header.SrcIP)))
-	attrs.PutStr(MetadataDest, u32ToIPv4(ntoh(event.Header.DstIP)))
-	attrs.PutInt(MetadataSrcPort, int64(ntohs(event.Header.SrcPort)))
-	attrs.PutInt(MetadataDestPort, int64(ntohs(event.Header.DstPort)))
+	attrs.PutStr(MetadataSrc, u32ToIPv4(event.Header.SrcIP))
+	attrs.PutStr(MetadataDest, u32ToIPv4(event.Header.DstIP))
+	attrs.PutInt(MetadataSrcPort, int64(event.Header.SrcPort))
+	attrs.PutInt(MetadataDestPort, int64(event.Header.DstPort))
 	attrs.PutInt(MetaPid, int64(pid))
 
 	switch event.Header.Protocol {
@@ -123,7 +123,7 @@ func fillResourceWithAttributes(attrs *pcommon.Map, event *L4Event, pid uint32) 
 		}
 	case unix.IPPROTO_UDP:
 		attrs.PutInt(TrafficType, int64(UDP))
-		if ntohs(event.Header.SrcPort) == 53 || ntohs(event.Header.DstPort) == 53 {
+		if event.Header.SrcPort == 53 || event.Header.DstPort == 53 {
 			tryDNS(data, attrs)
 		}
 	}
@@ -256,7 +256,7 @@ func tryDNS(data []byte, attrs *pcommon.Map) {
 }
 
 func buildTrafficIdentifier(event *L4Event) int64 {
-	minIP, minPort, maxIP, maxPort := ntoh(event.Header.SrcIP), ntohs(event.Header.SrcPort), ntoh(event.Header.DstIP), ntohs(event.Header.DstPort)
+	minIP, minPort, maxIP, maxPort := event.Header.SrcIP, event.Header.SrcPort, event.Header.DstIP, event.Header.DstPort
 	if minIP > maxIP {
 		minIP, maxIP = maxIP, minIP
 	}

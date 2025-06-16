@@ -11,8 +11,8 @@
 
 struct qtp_event_t {
     __u32 pid;
-    __u8 protocol; // 6 = TCP, 17 = UDP
-    __u8 family;   // AF_INET or AF_INET6
+    __u16 protocol; // 6 = TCP, 17 = UDP
+    __u16 family;   // AF_INET or AF_INET6
     __u32 saddr;
     __u32 daddr;
     __u16 sport;
@@ -32,8 +32,8 @@ static __always_inline void submit_ipv4_event(struct sock *sk, __u8 proto) {
     }
 
     __u32 pid = bpf_get_current_pid_tgid() >> 32;
-    event->pid = pid;
-    event->protocol = proto;
+    event->pid = __bpf_htonl(pid);
+    event->protocol = __bpf_htons(proto);
     event->family = AF_INET;
 
     bpf_core_read(&event->sport, sizeof(event->sport), &sk->__sk_common.skc_num);

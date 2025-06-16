@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"sync"
 	"syscall"
+	"unsafe"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
@@ -52,8 +53,8 @@ type EbpfSocketFilter struct {
 
 type PidEvent struct {
 	Pid      uint32
-	Protocol uint8
-	Family   uint8
+	Protocol uint16
+	Family   uint16
 	QuadTuple
 }
 
@@ -173,14 +174,22 @@ func (rcvr *ebpfReceiver) listenPid(ctx context.Context) func() {
 
 					var event PidEvent
 					buf := bytes.NewBuffer(record.RawSample)
-					if err := binary.Read(buf, HostOrder, &event); err != nil {
+					if err := binary.Read(buf, binary.BigEndian, &event); err != nil {
 						if err != io.EOF {
 							Logger().Sugar().Errorf("Failed to parse event header: %v", err)
 						}
 						continue
 					}
 
-					rcvr.eqtp.pidMap.Store(event.QuadTuple, ntoh(event.Pid))
+					Logger().Sugar().Debugf("Pid %d: from %s:%d, to %s:%d, protocal: %d\n",
+						event.Pid,
+						u32ToIPv4(event.SrcIP),
+						event.SrcPort,
+						u32ToIPv4(event.DstIP),
+						event.DstPort,
+						event.Protocol)
+
+					rcvr.eqtp.pidMap.Store(event.QuadTuple, event.Pid)
 				}
 			}
 		}
@@ -203,7 +212,7 @@ func (rcvr *ebpfReceiver) listenTraffic(ctx context.Context) func() {
 
 					var event L4Event
 					buf := bytes.NewBuffer(record.RawSample)
-					if err := binary.Read(buf, HostOrder, &event.Header); err != nil {
+					if err := binary.Read(buf, binary.BigEndian, &event.Header); err != nil {
 						if err != io.EOF {
 							Logger().Sugar().Errorf("Failed to parse event header: %v", err)
 						}
@@ -224,10 +233,10 @@ func (rcvr *ebpfReceiver) listenTraffic(ctx context.Context) func() {
 					}
 
 					Logger().Sugar().Debugf("L4 Packaet: from %s:%d, to %s:%d, protocal: %d, len: %d\n",
-						u32ToIPv4(ntoh(event.Header.SrcIP)),
-						ntohs(event.Header.SrcPort),
-						u32ToIPv4(ntoh(event.Header.DstIP)),
-						ntohs(event.Header.DstPort),
+						u32ToIPv4(event.Header.SrcIP),
+						event.Header.SrcPort,
+						u32ToIPv4(event.Header.DstIP),
+						event.Header.DstPort,
 						event.Header.Protocol,
 						event.Header.DataLength)
 
@@ -258,9 +267,39 @@ func allows(filter string, event L4Event) bool {
 		return true
 	}
 
-	ip := u32ToIPv4(ntoh(event.Header.SrcIP))
+	ip := u32ToIPv4(event.Header.SrcIP)
 	re := regexp.MustCompile(filter)
 	return re.MatchString(ip)
+}
+
+func (eqtp *EbpfQuadTuplePid) shutdown() {
+	_ = eqtp.eventReader.Close()
+
+	Logger().Sugar().Info("Detached eBPF program.")
+	_ = eqtp.tcp_kp.Close()
+	_ = eqtp.udp_kp.Close()
+
+	_ = eqtp.objs.RB.Close()
+	_ = eqtp.objs.Tcp.Close()
+	_ = eqtp.objs.Udp.Close()
+}
+
+func (esf *EbpfSocketFilter) shutdown(isPromosc bool) {
+	_ = esf.eventReader.Close()
+	if err := unix.SetsockoptInt(esf.sockFd, unix.SOL_SOCKET, unix.SO_DETACH_BPF, 0); err != nil {
+		Logger().Sugar().Fatalf("Failed to detach BPF program: %v", err)
+	}
+
+	if isPromosc {
+		if err := unix.SetsockoptPacketMreq(esf.sockFd, unix.SOL_PACKET, unix.PACKET_DROP_MEMBERSHIP, &esf.mreq); err != nil {
+			Logger().Sugar().Fatalf("Failed to set promisc: %v", err)
+		}
+	}
+
+	_ = syscall.Close(esf.sockFd)
+	Logger().Sugar().Info("Detached eBPF program.")
+	_ = esf.objs.Rb.Close()
+	_ = esf.objs.Prog.Close()
 }
 
 func (rcvr *ebpfReceiver) Shutdown(ctx context.Context) error {
@@ -269,21 +308,8 @@ func (rcvr *ebpfReceiver) Shutdown(ctx context.Context) error {
 	}
 
 	Logger().Sugar().Info("Exiting...")
-	_ = rcvr.esf.eventReader.Close()
-	if err := unix.SetsockoptInt(rcvr.esf.sockFd, unix.SOL_SOCKET, unix.SO_DETACH_BPF, 0); err != nil {
-		Logger().Sugar().Fatalf("Failed to detach BPF program: %v", err)
-	}
-
-	if rcvr.config.PromiscMode {
-		if err := unix.SetsockoptPacketMreq(rcvr.esf.sockFd, unix.SOL_PACKET, unix.PACKET_DROP_MEMBERSHIP, &rcvr.esf.mreq); err != nil {
-			Logger().Sugar().Fatalf("Failed to set promisc: %v", err)
-		}
-	}
-
-	_ = syscall.Close(rcvr.esf.sockFd)
-	Logger().Sugar().Info("Detached eBPF program.")
-	_ = rcvr.esf.objs.Rb.Close()
-	_ = rcvr.esf.objs.Prog.Close()
+	rcvr.eqtp.shutdown()
+	rcvr.esf.shutdown(rcvr.config.PromiscMode)
 	Logger().Sugar().Info("Exited")
 
 	return nil
@@ -293,8 +319,7 @@ var HostOrder = nativeEndian()
 
 func nativeEndian() binary.ByteOrder {
 	var i uint32 = 0x01020304
-	b := make([]byte, 4)
-	binary.LittleEndian.PutUint32(b, i)
+	b := (*[4]byte)(unsafe.Pointer(&i))
 
 	if b[0] == 0x04 {
 		return binary.LittleEndian
@@ -303,28 +328,15 @@ func nativeEndian() binary.ByteOrder {
 }
 
 func htons(h uint16) uint16 {
-	b := make([]byte, 4)
-	HostOrder.PutUint16(b, h)
-	return binary.BigEndian.Uint16(b)
-}
+	if HostOrder == binary.BigEndian {
+		return h;
+	}
 
-func ntohs(n uint16) uint16 {
-	b := make([]byte, 4)
-	binary.BigEndian.PutUint16(b, n)
-	return HostOrder.Uint16(b)
-}
-
-func ntoh(n uint32) uint32 {
-	b := make([]byte, 4)
-	binary.BigEndian.PutUint32(b, n)
-	return HostOrder.Uint32(b)
+	return (h&0xFF)<<8 | (h&0xFF00)>>8
 }
 
 func u32ToIPv4(ip uint32) string {
-	return net.IPv4(
-		byte(ip>>24),
-		byte(ip>>16),
-		byte(ip>>8),
-		byte(ip),
-	).String()
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint32(b, ip)
+	return net.IPv4(b[0], b[1], b[2], b[3]).String()
 }
