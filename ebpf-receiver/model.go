@@ -47,7 +47,8 @@ const MetadataNS = "k8s.namespace.name"
 const MetadataDeployName = "k8s.deployment.name"
 const MetadataNodeName = "k8s.node.name"
 const MetadataPodName = "k8s.pod.name"
-const MetaPid = "pid"
+const MetaSrcPid = "src.pid"
+const MetaDestPid = "dest.pid"
 
 const HttpMethod = "Method"
 const HttpUri = "URI"
@@ -59,19 +60,13 @@ const OtelTraceParent = "traceparent"
 const OtelTraceState = "tracestate"
 
 func (rcvr *ebpfReceiver) generateEbpfTraces(l4Event *L4Event) ptrace.Traces {
-	var pid uint32
-	if p, ok := rcvr.eqtp.pidMap.Load(l4Event.Header.QuadTuple); ok {
-		p, _ := p.(uint32)
-		pid = p
-	}
-	bodyAttributes := pcommon.NewMap()
-	fillResourceWithAttributes(&bodyAttributes, l4Event, pid)
+	bodyAttributes := rcvr.fillResourceWithAttributes(l4Event)
 
-	trafficType := getInt(&bodyAttributes, TrafficType)
+	trafficType := getInt(bodyAttributes, TrafficType)
 	traceParent, traceState := "", ""
 	if trafficType == int64(HTTP_REQ) || trafficType == int64(HTTP_RESP) {
-		traceParent = getStr(&bodyAttributes, OtelTraceParent)
-		traceState = getStr(&bodyAttributes, OtelTraceState)
+		traceParent = getStr(bodyAttributes, OtelTraceParent)
+		traceState = getStr(bodyAttributes, OtelTraceState)
 	}
 
 	traceId := NewTraceID()
@@ -100,7 +95,9 @@ func (rcvr *ebpfReceiver) generateEbpfTraces(l4Event *L4Event) ptrace.Traces {
 	return trace
 }
 
-func fillResourceWithAttributes(attrs *pcommon.Map, event *L4Event, pid uint32) {
+func (rcvr *ebpfReceiver) fillResourceWithAttributes(event *L4Event) *pcommon.Map {
+	attrs := pcommon.NewMap()
+	
 	endOfData := int(event.Header.DataLength)
 	if endOfData > len(event.Data) {
 		endOfData = len(event.Data)
@@ -113,20 +110,26 @@ func fillResourceWithAttributes(attrs *pcommon.Map, event *L4Event, pid uint32) 
 	attrs.PutStr(MetadataDest, u32ToIPv4(event.Header.DstIP))
 	attrs.PutInt(MetadataSrcPort, int64(event.Header.SrcPort))
 	attrs.PutInt(MetadataDestPort, int64(event.Header.DstPort))
-	attrs.PutInt(MetaPid, int64(pid))
 
 	switch event.Header.Protocol {
 	case unix.IPPROTO_TCP:
 		attrs.PutInt(TrafficType, int64(TCP))
-		if err := tryHttp11(data, attrs); err != nil {
-			_ = tryPgsql(data, attrs)
+		if err := tryHttp11(data, &attrs); err != nil {
+			_ = tryPgsql(data, &attrs)
 		}
 	case unix.IPPROTO_UDP:
 		attrs.PutInt(TrafficType, int64(UDP))
 		if event.Header.SrcPort == 53 || event.Header.DstPort == 53 {
-			tryDNS(data, attrs)
+			tryDNS(data, &attrs)
 		}
 	}
+
+	src_pid := rcvr.eqtp.GetPid(event.Header.SrcIP)
+	dest_pid := rcvr.eqtp.GetPid(event.Header.DstIP)
+	attrs.PutInt(MetaSrcPid, int64(src_pid))
+	attrs.PutInt(MetaDestPid, int64(dest_pid))
+
+	return &attrs
 }
 
 func getSpanWithRs(traceId pcommon.TraceID, parentSpanId pcommon.SpanID) (ptrace.Traces, ptrace.Span, pcommon.Resource) {

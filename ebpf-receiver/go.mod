@@ -1,6 +1,8 @@
 module github.com/open-telemetry/otelcol-ebpf-demo/epbf-receiver
 
-go 1.23.4
+go 1.24.0
+
+toolchain go1.24.4
 
 require (
 	github.com/cilium/ebpf v0.17.1

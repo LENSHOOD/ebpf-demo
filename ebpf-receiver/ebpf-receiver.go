@@ -189,7 +189,7 @@ func (rcvr *ebpfReceiver) listenPid(ctx context.Context) func() {
 						event.DstPort,
 						event.Protocol)
 
-					rcvr.eqtp.pidMap.Store(event.QuadTuple, event.Pid)
+					rcvr.eqtp.SetPid(event.QuadTuple.SrcIP, event.Pid)
 				}
 			}
 		}
@@ -270,6 +270,25 @@ func allows(filter string, event L4Event) bool {
 	ip := u32ToIPv4(event.Header.SrcIP)
 	re := regexp.MustCompile(filter)
 	return re.MatchString(ip)
+}
+
+func (eqtp *EbpfQuadTuplePid) SetPid(ip uint32, pid uint32) {
+	if p, ok := eqtp.pidMap.Load(ip); ok {
+		if p == pid {
+			return
+		}
+	}
+
+	eqtp.pidMap.Store(ip, pid)
+}
+
+func (eqtp *EbpfQuadTuplePid) GetPid(ip uint32) uint32 {
+	if p, ok := eqtp.pidMap.Load(ip); ok {
+		p, _ := p.(uint32)
+		return p
+	}
+
+	return 0
 }
 
 func (eqtp *EbpfQuadTuplePid) shutdown() {
