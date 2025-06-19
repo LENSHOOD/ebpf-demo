@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"github.com/cilium/ebpf"
@@ -159,6 +160,8 @@ func (rcvr *ebpfReceiver) loadSocketFilter(binPath string, nicName string) {
 }
 
 func (rcvr *ebpfReceiver) listenPid(ctx context.Context) func() {
+	go rcvr.eqtp.clear(2 * time.Minute)
+
 	return func() {
 		for {
 			select {
@@ -272,23 +275,41 @@ func allows(filter string, event L4Event) bool {
 	return re.MatchString(ip)
 }
 
+type timedPid struct {
+	pid uint32
+	ts time.Time
+}
 func (eqtp *EbpfQuadTuplePid) SetPid(ip uint32, pid uint32) {
-	if p, ok := eqtp.pidMap.Load(ip); ok {
-		if p == pid {
-			return
-		}
+	val := timedPid {
+		pid,
+		time.Now(),
 	}
-
-	eqtp.pidMap.Store(ip, pid)
+	eqtp.pidMap.Store(ip, val)
 }
 
 func (eqtp *EbpfQuadTuplePid) GetPid(ip uint32) uint32 {
-	if p, ok := eqtp.pidMap.Load(ip); ok {
-		p, _ := p.(uint32)
-		return p
+	if val, ok := eqtp.pidMap.Load(ip); ok {
+		tp, _ := val.(timedPid)
+		return tp.pid
 	}
 
 	return 0
+}
+
+func (eqtp *EbpfQuadTuplePid) clear(ttl time.Duration) {
+	ticker := time.NewTicker(ttl)
+	defer ticker.Stop()
+	
+	for range ticker.C {
+		now := time.Now()
+		eqtp.pidMap.Range(func(key, value any) bool {
+			tp, _ := value.(timedPid)
+			if now.Sub(tp.ts) > ttl {
+				eqtp.pidMap.Delete(key)
+			}
+			return true
+		})
+	}
 }
 
 func (eqtp *EbpfQuadTuplePid) shutdown() {
