@@ -3,10 +3,11 @@ package ebpf_receiver
 // EbpfRcvrConfig represents the receiver config settings within the collector's config.yaml
 type EbpfRcvrConfig struct {
 	EbpfTrafficBinPath string `mapstructure:"ebpf_traffic_binary_path"`
-	EbpfPidBinPath string `mapstructure:"ebpf_pid_binary_path"`
+	EbpfPidBinPath     string `mapstructure:"ebpf_pid_binary_path"`
 	NicName            string `mapstructure:"nic_name"`
 	IpFilter           string `mapstructure:"ip_filter"`
 	PromiscMode        bool   `mapstructure:"promisc_mode"`
+	DebugMode          bool   `mapstructure:"debug_mode"`
 }
 
 // Validate checks if the receiver configuration is valid

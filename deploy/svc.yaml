@@ -37,8 +37,12 @@ spec:
       targetPort: 9411
       protocol: TCP
     - name: debug
-      port: 4000
-      targetPort: 4000
+      port: 40000
+      targetPort: 40000
+      protocol: TCP
+    - name: pprof
+      port: 6060
+      targetPort: 6060
       protocol: TCP
   type: ClusterIP
   

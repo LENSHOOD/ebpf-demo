@@ -31,6 +31,8 @@ spec:
             fieldRef:
               apiVersion: v1
               fieldPath: spec.nodeName
+        - name: GOGC
+          value: "50"
         volumeMounts:
           - name: tzdata
             mountPath: /usr/share/zoneinfo
@@ -81,6 +83,9 @@ spec:
           protocol: TCP
         - name: debug
           containerPort: 40000
+          protocol: TCP
+        - name: pprof
+          containerPort: 6060
           protocol: TCP
       volumes:
         - name: tzdata
