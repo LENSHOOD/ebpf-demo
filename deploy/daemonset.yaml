@@ -102,6 +102,8 @@ spec:
                   name: ebpf-bin-traffic
               - configMap:
                   name: ebpf-bin-pid
+              - configMap:
+                  name: ebpf-bin-filerw
         - name: db-init
           configMap:
             name: db-init

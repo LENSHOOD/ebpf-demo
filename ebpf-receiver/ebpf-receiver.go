@@ -73,6 +73,27 @@ type EbpfQuadTuplePid struct {
 	pidMap      sync.Map
 }
 
+type FileRwEvent struct {
+	Pid      uint32
+	Comm     [16]byte
+	Filename [256]byte
+	Bytes    uint32
+	Op       uint32
+}
+
+type FileRwObjects struct {
+	RB *ebpf.Map     `ebpf:"frw_events_rb"`
+	R  *ebpf.Program `ebpf:"handle_vfs_read_ret"`
+	W  *ebpf.Program `ebpf:"handle_vfs_write_ret"`
+}
+
+type EbpfFileRw struct {
+	objs        *FileRwObjects
+	r_kp        link.Link
+	w_kp        link.Link
+	eventReader *ringbuf.Reader
+}
+
 type ebpfReceiver struct {
 	host         component.Host
 	cancel       context.CancelFunc
@@ -80,6 +101,7 @@ type ebpfReceiver struct {
 	config       *EbpfRcvrConfig
 	esf          *EbpfSocketFilter
 	eqtp         *EbpfQuadTuplePid
+	efrw         *EbpfFileRw
 }
 
 func (rcvr *ebpfReceiver) Start(ctx context.Context, host component.Host) error {
@@ -87,11 +109,13 @@ func (rcvr *ebpfReceiver) Start(ctx context.Context, host component.Host) error 
 	ctx, rcvr.cancel = context.WithCancel(ctx)
 
 	rcvr.loadQuadTuplePid(rcvr.config.EbpfPidBinPath)
+	rcvr.loadFileRw(rcvr.config.EbpfFileRwBinPath)
 	rcvr.loadSocketFilter(rcvr.config.EbpfTrafficBinPath, rcvr.config.NicName)
 
 	Logger().Sugar().Info("Listening for L4 traffic...")
 
 	go rcvr.listenPid(ctx)()
+	go rcvr.listenFileRw(ctx)
 	go rcvr.listenTraffic(ctx)()
 
 	return nil
@@ -117,6 +141,28 @@ func (rcvr *ebpfReceiver) loadQuadTuplePid(binPath string) {
 		Logger().Sugar().Fatalf("Failed to create event reader: %v", err)
 	}
 	rcvr.eqtp.eventReader = reader
+}
+
+func (rcvr *ebpfReceiver) loadFileRw(binPath string) {
+	loadEbpf(binPath, rcvr.efrw.objs)
+
+	r_kp, err := link.Kretprobe("vfs_read", rcvr.efrw.objs.R, nil)
+	if err != nil {
+		Logger().Sugar().Fatalf("Failed to vfs_read: %v", err)
+	}
+	rcvr.efrw.r_kp = r_kp
+
+	w_kp, err := link.Kretprobe("vfs_write", rcvr.efrw.objs.W, nil)
+	if err != nil {
+		Logger().Sugar().Fatalf("Failed to vfs_write: %v", err)
+	}
+	rcvr.efrw.w_kp = w_kp
+
+	reader, err := ringbuf.NewReader(rcvr.efrw.objs.RB)
+	if err != nil {
+		Logger().Sugar().Fatalf("Failed to create event reader: %v", err)
+	}
+	rcvr.efrw.eventReader = reader
 }
 
 func (rcvr *ebpfReceiver) loadSocketFilter(binPath string, nicName string) {
@@ -193,6 +239,36 @@ func (rcvr *ebpfReceiver) listenPid(ctx context.Context) func() {
 						event.Protocol)
 
 					rcvr.eqtp.SetPid(event.QuadTuple.SrcIP, event.Pid)
+				}
+			}
+		}
+	}
+}
+
+func (rcvr *ebpfReceiver) listenFileRw(ctx context.Context) func() {
+	return func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				{
+					record, err := rcvr.efrw.eventReader.Read()
+					if err != nil {
+						Logger().Sugar().Errorf("Error reading from perf buffer: %v", err)
+						continue
+					}
+
+					var event FileRwEvent
+					buf := bytes.NewBuffer(record.RawSample)
+					if err := binary.Read(buf, binary.LittleEndian, &event); err != nil {
+						if err != io.EOF {
+							Logger().Sugar().Errorf("Failed to parse event header: %v", err)
+						}
+						continue
+					}
+
+					Logger().Sugar().Errorf("\n------------\nFileRW: %v\n------------\n", event)
 				}
 			}
 		}
@@ -277,10 +353,11 @@ func allows(filter string, event L4Event) bool {
 
 type timedPid struct {
 	pid uint32
-	ts time.Time
+	ts  time.Time
 }
+
 func (eqtp *EbpfQuadTuplePid) SetPid(ip uint32, pid uint32) {
-	val := timedPid {
+	val := timedPid{
 		pid,
 		time.Now(),
 	}
@@ -299,7 +376,7 @@ func (eqtp *EbpfQuadTuplePid) GetPid(ip uint32) uint32 {
 func (eqtp *EbpfQuadTuplePid) clear(ttl time.Duration) {
 	ticker := time.NewTicker(ttl)
 	defer ticker.Stop()
-	
+
 	for range ticker.C {
 		now := time.Now()
 		eqtp.pidMap.Range(func(key, value any) bool {
@@ -322,6 +399,18 @@ func (eqtp *EbpfQuadTuplePid) shutdown() {
 	_ = eqtp.objs.RB.Close()
 	_ = eqtp.objs.Tcp.Close()
 	_ = eqtp.objs.Udp.Close()
+}
+
+func (efrw *EbpfFileRw) shutdown() {
+	_ = efrw.eventReader.Close()
+
+	Logger().Sugar().Info("Detached eBPF program.")
+	_ = efrw.r_kp.Close()
+	_ = efrw.w_kp.Close()
+
+	_ = efrw.objs.RB.Close()
+	_ = efrw.objs.R.Close()
+	_ = efrw.objs.W.Close()
 }
 
 func (esf *EbpfSocketFilter) shutdown(isPromosc bool) {
@@ -349,6 +438,7 @@ func (rcvr *ebpfReceiver) Shutdown(ctx context.Context) error {
 
 	Logger().Sugar().Info("Exiting...")
 	rcvr.eqtp.shutdown()
+	rcvr.efrw.shutdown()
 	rcvr.esf.shutdown(rcvr.config.PromiscMode)
 	Logger().Sugar().Info("Exited")
 
@@ -369,7 +459,7 @@ func nativeEndian() binary.ByteOrder {
 
 func htons(h uint16) uint16 {
 	if HostOrder == binary.BigEndian {
-		return h;
+		return h
 	}
 
 	return (h&0xFF)<<8 | (h&0xFF00)>>8

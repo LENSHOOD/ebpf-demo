@@ -22,6 +22,9 @@ configMapGenerator:
   - name: ebpf-bin-pid
     files:
       - ebpf-receiver/ebpf/quad_tuple_pid.o
+  - name: ebpf-bin-filerw
+    files:
+      - ebpf-receiver/ebpf/file_rw.o
   - name: db-init
     files:
       - pg-exporter/db_init/init.sql

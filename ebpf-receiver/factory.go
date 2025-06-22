@@ -43,6 +43,9 @@ func createTracesReceiver(_ context.Context, params receiver.Settings, baseCfg c
 		eqtp: &EbpfQuadTuplePid{
 			objs: &EqtpObjects{},
 		},
+		efrw: &EbpfFileRw{
+			objs: &FileRwObjects{},
+		},
 	}
 
 	return traceRcvr, nil
@@ -50,23 +53,23 @@ func createTracesReceiver(_ context.Context, params receiver.Settings, baseCfg c
 
 func startPprof() {
 	go func() {
-        http.ListenAndServe("0.0.0.0:6060", nil)
-    }()
+		http.ListenAndServe("0.0.0.0:6060", nil)
+	}()
 
-	go func ()  {
+	go func() {
 		t := time.NewTicker(10 * time.Second)
 		defer t.Stop()
-		for range t.C{
+		for range t.C {
 			var mem runtime.MemStats
 			runtime.ReadMemStats(&mem)
 			Logger().Sugar().Errorf(
-				"\nSys = %v MiB\nHeapAlloc = %v MiB\nHeapInuse = %v MiB\nHeapSys = %v MiB\nObjects = %v\nHeapIdle = %v MiB\nHeapReleased = %v MiB\n", 
-				mem.Sys/1024/1024, 
-				mem.HeapAlloc/1024/1024, 
-				mem.HeapInuse/1024/1024, 
-				mem.HeapSys/1024/1024, 
-				mem.HeapObjects, 
-				mem.HeapIdle/1024/1024, 
+				"\nSys = %v MiB\nHeapAlloc = %v MiB\nHeapInuse = %v MiB\nHeapSys = %v MiB\nObjects = %v\nHeapIdle = %v MiB\nHeapReleased = %v MiB\n",
+				mem.Sys/1024/1024,
+				mem.HeapAlloc/1024/1024,
+				mem.HeapInuse/1024/1024,
+				mem.HeapSys/1024/1024,
+				mem.HeapObjects,
+				mem.HeapIdle/1024/1024,
 				mem.HeapReleased/1024/1024)
 		}
 	}()

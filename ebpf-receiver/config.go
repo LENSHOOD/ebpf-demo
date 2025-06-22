@@ -4,6 +4,7 @@ package ebpf_receiver
 type EbpfRcvrConfig struct {
 	EbpfTrafficBinPath string `mapstructure:"ebpf_traffic_binary_path"`
 	EbpfPidBinPath     string `mapstructure:"ebpf_pid_binary_path"`
+	EbpfFileRwBinPath  string `mapstructure:"ebpf_file_rw_binary_path"`
 	NicName            string `mapstructure:"nic_name"`
 	IpFilter           string `mapstructure:"ip_filter"`
 	PromiscMode        bool   `mapstructure:"promisc_mode"`
@@ -22,6 +23,10 @@ func (cfg *EbpfRcvrConfig) Validate() error {
 
 	if len(cfg.EbpfPidBinPath) == 0 {
 		Logger().Sugar().Fatalf("the ebpf_pid_binary_path should be provided!")
+	}
+
+	if len(cfg.EbpfFileRwBinPath) == 0 {
+		Logger().Sugar().Fatalf("the ebpf_file_rw_binary_path should be provided!")
 	}
 	return nil
 }

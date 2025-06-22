@@ -10,7 +10,7 @@ GO_DIR = otelcol-ebpf-demo
 
 CLANG = clang
 BPF_DIR = ebpf-receiver/ebpf
-BPF_SRC = $(BPF_DIR)/l4_traffic.bpf.c $(BPF_DIR)/quad_tuple_pid.bpf.c
+BPF_SRC = $(BPF_DIR)/l4_traffic.bpf.c $(BPF_DIR)/quad_tuple_pid.bpf.c $(BPF_DIR)/file_rw.bpf.c
 BPF_OBJ = $(BPF_SRC:.bpf.c=.o)
 
 ARCH := $(shell uname -m)
