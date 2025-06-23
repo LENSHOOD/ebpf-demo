@@ -77,7 +77,6 @@ type FileRwEvent struct {
 	Pid      uint32
 	Comm     [16]byte
 	Filename [256]byte
-	Bytes    uint32
 	Op       uint32
 }
 
@@ -115,7 +114,7 @@ func (rcvr *ebpfReceiver) Start(ctx context.Context, host component.Host) error 
 	Logger().Sugar().Info("Listening for L4 traffic...")
 
 	go rcvr.listenPid(ctx)()
-	go rcvr.listenFileRw(ctx)
+	go rcvr.listenFileRw(ctx)()
 	go rcvr.listenTraffic(ctx)()
 
 	return nil
@@ -146,13 +145,13 @@ func (rcvr *ebpfReceiver) loadQuadTuplePid(binPath string) {
 func (rcvr *ebpfReceiver) loadFileRw(binPath string) {
 	loadEbpf(binPath, rcvr.efrw.objs)
 
-	r_kp, err := link.Kretprobe("vfs_read", rcvr.efrw.objs.R, nil)
+	r_kp, err := link.Kprobe("vfs_read", rcvr.efrw.objs.R, nil)
 	if err != nil {
 		Logger().Sugar().Fatalf("Failed to vfs_read: %v", err)
 	}
 	rcvr.efrw.r_kp = r_kp
 
-	w_kp, err := link.Kretprobe("vfs_write", rcvr.efrw.objs.W, nil)
+	w_kp, err := link.Kprobe("vfs_write", rcvr.efrw.objs.W, nil)
 	if err != nil {
 		Logger().Sugar().Fatalf("Failed to vfs_write: %v", err)
 	}
@@ -268,7 +267,7 @@ func (rcvr *ebpfReceiver) listenFileRw(ctx context.Context) func() {
 						continue
 					}
 
-					Logger().Sugar().Errorf("\n------------\nFileRW: %v\n------------\n", event)
+					Logger().Sugar().Errorf("\n------------\nFileRW: %s: %s\n------------\n", string(event.Comm[:]), string(event.Filename[:]))
 				}
 			}
 		}
