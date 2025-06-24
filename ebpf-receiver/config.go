@@ -7,6 +7,7 @@ type EbpfRcvrConfig struct {
 	EbpfFileRwBinPath  string `mapstructure:"ebpf_file_rw_binary_path"`
 	NicName            string `mapstructure:"nic_name"`
 	IpFilter           string `mapstructure:"ip_filter"`
+	CmdFilter          string `mapstructure:"cmd_filter"`
 	PromiscMode        bool   `mapstructure:"promisc_mode"`
 	DebugMode          bool   `mapstructure:"debug_mode"`
 }

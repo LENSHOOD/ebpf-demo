@@ -85,7 +85,7 @@ func (rcvr *ebpfReceiver) generateEbpfTraces(l4Event *L4Event) ptrace.Traces {
 		Logger().Sugar().Debugf("TraceParent: %s, TraceState: %s, TraceId: %s, ParentSpan: %s", traceParent, traceState, traceId.String(), parentSpanId.String())
 	}
 
-	trace, span, rs := getSpanWithRs(traceId, parentSpanId)
+	trace, span, rs := getSpanWithRs(traceId, parentSpanId, "ebpf-net-traffic")
 	bodyAttributes.CopyTo(rs.Attributes())
 
 	ts := time.Now().UTC().UnixNano()
@@ -132,19 +132,18 @@ func (rcvr *ebpfReceiver) fillResourceWithAttributes(event *L4Event) *pcommon.Ma
 	return &attrs
 }
 
-func getSpanWithRs(traceId pcommon.TraceID, parentSpanId pcommon.SpanID) (ptrace.Traces, ptrace.Span, pcommon.Resource) {
+func getSpanWithRs(traceId pcommon.TraceID, parentSpanId pcommon.SpanID, spanName string) (ptrace.Traces, ptrace.Span, pcommon.Resource) {
 	traces := ptrace.NewTraces()
 	ebpfSpan := traces.ResourceSpans().AppendEmpty()
 	ebpfRs := ebpfSpan.Resource()
 	scopeSpans := ebpfSpan.ScopeSpans().AppendEmpty()
 	scopeSpans.Scope().SetName("ebpf-receiver")
-	scopeSpans.Scope().SetVersion("1.0.0")
 
 	span := scopeSpans.Spans().AppendEmpty()
 	span.SetTraceID(traceId)
 	span.SetParentSpanID(parentSpanId)
 	span.SetSpanID(NewSpanID())
-	span.SetName("ebpf-net-traffic")
+	span.SetName(spanName)
 	span.SetKind(ptrace.SpanKindClient)
 	span.Status().SetCode(ptrace.StatusCodeOk)
 
@@ -256,6 +255,29 @@ func tryDNS(data []byte, attrs *pcommon.Map) {
 		attrs.PutInt(TrafficType, int64(DNS_RESP))
 	}
 	attrs.PutStr(BodyContent, msg.GoString())
+}
+
+func (rcvr *ebpfReceiver) generateFilRwTrace(event *FileRwEvent) ptrace.Traces {
+	traceId := NewTraceID()
+	parentSpanId := pcommon.NewSpanIDEmpty()
+
+	trace, span, rs := getSpanWithRs(traceId, parentSpanId, "ebpf-file-rw")
+	attr := rs.Attributes()
+	attr.PutStr(ServiceName, "ebpf-receiver")
+	attr.PutInt("PID", int64(event.Pid))
+	op := "READ"
+	if event.Op == 1 {
+		op = "WRITE"
+	}
+	attr.PutStr("OP", op)
+	attr.PutStr("CMD", string(event.Comm[:]))
+	attr.PutStr("FILE_NAME", string(event.Filename[:]))
+
+	ts := time.Now().UTC().UnixNano()
+	span.SetStartTimestamp(pcommon.Timestamp(ts))
+	span.SetEndTimestamp(pcommon.Timestamp(ts + 1_000_000))
+
+	return trace
 }
 
 func buildTrafficIdentifier(event *L4Event) int64 {

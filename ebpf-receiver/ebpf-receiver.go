@@ -267,7 +267,11 @@ func (rcvr *ebpfReceiver) listenFileRw(ctx context.Context) func() {
 						continue
 					}
 
-					Logger().Sugar().Errorf("\n------------\nFileRW: %s: %s\n------------\n", string(event.Comm[:]), string(event.Filename[:]))
+					if !allows_cmd(rcvr.config.CmdFilter, &event) {
+						continue
+					}
+
+					_ = rcvr.nextConsumer.ConsumeTraces(ctx, rcvr.generateFilRwTrace(&event))
 				}
 			}
 		}
@@ -306,7 +310,7 @@ func (rcvr *ebpfReceiver) listenTraffic(ctx context.Context) func() {
 						continue
 					}
 
-					if !allows(rcvr.config.IpFilter, event) {
+					if !allows(rcvr.config.IpFilter, &event) {
 						continue
 					}
 
@@ -340,7 +344,7 @@ func loadEbpf(binPath string, objs any) {
 	}
 }
 
-func allows(filter string, event L4Event) bool {
+func allows(filter string, event *L4Event) bool {
 	if filter == "" {
 		return true
 	}
@@ -348,6 +352,15 @@ func allows(filter string, event L4Event) bool {
 	ip := u32ToIPv4(event.Header.SrcIP)
 	re := regexp.MustCompile(filter)
 	return re.MatchString(ip)
+}
+
+func allows_cmd(cmd string, event *FileRwEvent) bool {
+	if cmd == "" {
+		return true
+	}
+
+	re := regexp.MustCompile(cmd)
+	return re.MatchString(string(event.Comm[:]))
 }
 
 type timedPid struct {
