@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"net"
+	"os"
 	"regexp"
 	"sync"
 	"syscall"
@@ -74,22 +76,23 @@ type EbpfQuadTuplePid struct {
 }
 
 type FileRwEvent struct {
-	Pid      uint32
-	Comm     [16]byte
-	Filename [256]byte
-	Op       uint32
+	Pid     uint32
+	Comm    [16]byte
+	Fd      uint32
+	Op      uint32
+	Padding uint32
 }
 
 type FileRwObjects struct {
 	RB *ebpf.Map     `ebpf:"frw_events_rb"`
-	R  *ebpf.Program `ebpf:"handle_vfs_read_ret"`
-	W  *ebpf.Program `ebpf:"handle_vfs_write_ret"`
+	R  *ebpf.Program `ebpf:"handle_sys_enter_read"`
+	W  *ebpf.Program `ebpf:"handle_sys_enter_write"`
 }
 
 type EbpfFileRw struct {
 	objs        *FileRwObjects
-	r_kp        link.Link
-	w_kp        link.Link
+	read        link.Link
+	write        link.Link
 	eventReader *ringbuf.Reader
 }
 
@@ -145,17 +148,17 @@ func (rcvr *ebpfReceiver) loadQuadTuplePid(binPath string) {
 func (rcvr *ebpfReceiver) loadFileRw(binPath string) {
 	loadEbpf(binPath, rcvr.efrw.objs)
 
-	r_kp, err := link.Kprobe("vfs_read", rcvr.efrw.objs.R, nil)
+	read, err := link.Tracepoint("syscalls", "sys_enter_read", rcvr.efrw.objs.R, nil)
 	if err != nil {
-		Logger().Sugar().Fatalf("Failed to vfs_read: %v", err)
+		Logger().Sugar().Fatalf("Failed to sys_enter_read: %v", err)
 	}
-	rcvr.efrw.r_kp = r_kp
+	rcvr.efrw.read = read
 
-	w_kp, err := link.Kprobe("vfs_write", rcvr.efrw.objs.W, nil)
+	write, err := link.Tracepoint("syscalls", "sys_enter_write", rcvr.efrw.objs.W, nil)
 	if err != nil {
-		Logger().Sugar().Fatalf("Failed to vfs_write: %v", err)
+		Logger().Sugar().Fatalf("Failed to sys_enter_write: %v", err)
 	}
-	rcvr.efrw.w_kp = w_kp
+	rcvr.efrw.write = write
 
 	reader, err := ringbuf.NewReader(rcvr.efrw.objs.RB)
 	if err != nil {
@@ -271,11 +274,25 @@ func (rcvr *ebpfReceiver) listenFileRw(ctx context.Context) func() {
 						continue
 					}
 
-					_ = rcvr.nextConsumer.ConsumeTraces(ctx, rcvr.generateFilRwTrace(&event))
+					path, err := getFilePathByPidFd(event.Pid, event.Fd)
+					if err != nil {
+						Logger().Sugar().Debugf("error fetch file path: %v", err)
+					} else {
+						_ = rcvr.nextConsumer.ConsumeTraces(ctx, rcvr.generateFilRwTrace(&event, path))
+					}
 				}
 			}
 		}
 	}
+}
+
+func getFilePathByPidFd(pid uint32, fd uint32) (string, error) {
+    path := fmt.Sprintf("/hostproc/%d/fd/%d", pid, fd)
+    realPath, err := os.Readlink(path)
+    if err != nil {
+        return "", err
+    }
+    return realPath, nil
 }
 
 func (rcvr *ebpfReceiver) listenTraffic(ctx context.Context) func() {
@@ -417,8 +434,8 @@ func (efrw *EbpfFileRw) shutdown() {
 	_ = efrw.eventReader.Close()
 
 	Logger().Sugar().Info("Detached eBPF program.")
-	_ = efrw.r_kp.Close()
-	_ = efrw.w_kp.Close()
+	_ = efrw.read.Close()
+	_ = efrw.write.Close()
 
 	_ = efrw.objs.RB.Close()
 	_ = efrw.objs.R.Close()

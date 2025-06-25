@@ -97,7 +97,7 @@ func (rcvr *ebpfReceiver) generateEbpfTraces(l4Event *L4Event) ptrace.Traces {
 
 func (rcvr *ebpfReceiver) fillResourceWithAttributes(event *L4Event) *pcommon.Map {
 	attrs := pcommon.NewMap()
-	
+
 	endOfData := int(event.Header.DataLength)
 	if endOfData > len(event.Data) {
 		endOfData = len(event.Data)
@@ -257,7 +257,7 @@ func tryDNS(data []byte, attrs *pcommon.Map) {
 	attrs.PutStr(BodyContent, msg.GoString())
 }
 
-func (rcvr *ebpfReceiver) generateFilRwTrace(event *FileRwEvent) ptrace.Traces {
+func (rcvr *ebpfReceiver) generateFilRwTrace(event *FileRwEvent, path string) ptrace.Traces {
 	traceId := NewTraceID()
 	parentSpanId := pcommon.NewSpanIDEmpty()
 
@@ -265,13 +265,15 @@ func (rcvr *ebpfReceiver) generateFilRwTrace(event *FileRwEvent) ptrace.Traces {
 	attr := rs.Attributes()
 	attr.PutStr(ServiceName, "ebpf-receiver")
 	attr.PutInt("PID", int64(event.Pid))
+	attr.PutInt("FD", int64(event.Fd))
 	op := "READ"
 	if event.Op == 1 {
 		op = "WRITE"
 	}
 	attr.PutStr("OP", op)
 	attr.PutStr("CMD", string(event.Comm[:]))
-	attr.PutStr("FILE_NAME", string(event.Filename[:]))
+
+	attr.PutStr("FILE_NAME", path)
 
 	ts := time.Now().UTC().UnixNano()
 	span.SetStartTimestamp(pcommon.Timestamp(ts))

@@ -50,6 +50,12 @@ spec:
             mountPropagation: HostToContainer
             name: hostfs
             readOnly: true
+          - name: tracefs
+            mountPath: /sys/kernel/tracing
+            readOnly: true
+          - name: host-proc
+            mountPath: /hostproc
+            readOnly: true
         resources:
           limits:
             memory: "1024Mi"
@@ -115,6 +121,14 @@ spec:
           hostPath:
             path: /var/log/pods
             type: ""
+        - name: tracefs
+          hostPath:
+            path: /sys/kernel/tracing
+            type: Directory
+        - name: host-proc
+          hostPath:
+            path: /proc
+            type: Directory
 ### Exclude master node
 #      tolerations:
 #      - key: "node-role.kubernetes.io/master"
