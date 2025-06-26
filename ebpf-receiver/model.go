@@ -49,6 +49,11 @@ const MetadataNodeName = "k8s.node.name"
 const MetadataPodName = "k8s.pod.name"
 const MetaSrcPid = "src.pid"
 const MetaDestPid = "dest.pid"
+const MetaFilePid = "file.pid"
+const MetaFileFd = "file.fd"
+const MetaFileCmd = "file.cmd"
+const MetaFileOp = "file.op"
+const MetaFilename = "file.name"
 
 const HttpMethod = "Method"
 const HttpUri = "URI"
@@ -264,16 +269,16 @@ func (rcvr *ebpfReceiver) generateFilRwTrace(event *FileRwEvent, path string) pt
 	trace, span, rs := getSpanWithRs(traceId, parentSpanId, "ebpf-file-rw")
 	attr := rs.Attributes()
 	attr.PutStr(ServiceName, "ebpf-receiver")
-	attr.PutInt("PID", int64(event.Pid))
-	attr.PutInt("FD", int64(event.Fd))
+	attr.PutInt(MetaFilePid, int64(event.Pid))
+	attr.PutInt(MetaFileFd, int64(event.Fd))
 	op := "READ"
 	if event.Op == 1 {
 		op = "WRITE"
 	}
-	attr.PutStr("OP", op)
-	attr.PutStr("CMD", string(event.Comm[:]))
+	attr.PutStr(MetaFileOp, op)
+	attr.PutStr(MetaFileCmd, string(event.Comm[:]))
 
-	attr.PutStr("FILE_NAME", path)
+	attr.PutStr(MetaFilename, path)
 
 	ts := time.Now().UTC().UnixNano()
 	span.SetStartTimestamp(pcommon.Timestamp(ts))
