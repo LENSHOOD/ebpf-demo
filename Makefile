@@ -33,7 +33,6 @@ dev-in-container:
 	$(DOCKER) build -t ebpf-demo-builder:latest -f Dockerfile.build .
 	$(DOCKER) run -it --rm -v ./:/build -w /build ebpf-demo-builder:latest /bin/bash
 
-BUILD_CONFIG = builder-config.yaml
 build: build-ebpf build-collector
 build-collector:
 	$(GO_ENV) ${OCB} --config $(BUILD_CONFIG)

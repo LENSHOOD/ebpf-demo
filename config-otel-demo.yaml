@@ -67,12 +67,13 @@ receivers:
     ebpf_file_rw_binary_path: "ebpf-receiver/ebpf/file_rw.o"
     ### Here we set the nic name that to be sniffed
     nic_name: "cni0"
-    ### [OPTIONAL] RegEx Filter, Capable of Filtering the Source IP
+    ### [OPTIONAL] RegEx filter, capable of filtering the source IP
     # ip_filter: ^*$
-    ### [OPTIONAL] Whether Set the Monitor Socket in Promisc Mode
+    ### [OPTIONAL] Whether set the monitor socket in Promisc mode
     promisc_mode: true
-    ### [OPTIONAL] RegEx Filter, Capable of Filtering the File IO Command
+    ### [OPTIONAL] RegEx filter, capable of filtering the File IO command
     # cmd_filter: ^*$
+     ### [OPTIONAL] Enabling pprof & heap mem printer
     debug_mode: true
   httpcheck/frontend-proxy:
     targets:
